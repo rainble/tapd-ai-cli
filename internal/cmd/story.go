@@ -33,6 +33,7 @@ var (
 	flagResolution  string
 	flagEffort      string
 	flagCustomField []string
+	flagFields      string
 )
 
 // storyCmd 是 story 父命令
@@ -96,6 +97,7 @@ func init() {
 	storyListCmd.Flags().StringVar(&flagCategoryID, "category-id", "", "按需求分类 ID 筛选")
 	storyListCmd.Flags().StringVar(&flagLabel, "label", "", "按标签筛选")
 	storyListCmd.Flags().StringVar(&flagOrder, "order", "", "排序规则（如 \"created desc\"）")
+	storyListCmd.Flags().StringVar(&flagFields, "fields", "", "自定义返回字段列表（逗号分隔，如 \"id,name,status,module\"）")
 	storyListCmd.Flags().IntVar(&flagLimit, "limit", 10, "返回数量限制")
 	storyListCmd.Flags().IntVar(&flagPage, "page", 1, "页码")
 
@@ -140,6 +142,10 @@ func init() {
 }
 
 func runStoryList(cmd *cobra.Command, args []string) error {
+	fields := "id,name,status,owner,modified"
+	if flagFields != "" {
+		fields = flagFields
+	}
 	req := &model.ListStoriesRequest{
 		WorkspaceID:   flagWorkspaceID,
 		Name:          flagName,
@@ -150,7 +156,7 @@ func runStoryList(cmd *cobra.Command, args []string) error {
 		CategoryID:    flagCategoryID,
 		Label:         flagLabel,
 		Order:         flagOrder,
-		Fields:        "id,name,status,owner,modified",
+		Fields:        fields,
 		Limit:         flagLimit,
 		Page:          flagPage,
 	}

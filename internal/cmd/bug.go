@@ -81,6 +81,7 @@ func init() {
 	bugListCmd.Flags().StringVar(&flagLabel, "label", "", "按标签筛选")
 	bugListCmd.Flags().StringVar(&flagReporter, "reporter", "", "按创建人筛选")
 	bugListCmd.Flags().StringVar(&flagOrder, "order", "", "排序规则（如 \"created desc\"）")
+	bugListCmd.Flags().StringVar(&flagFields, "fields", "", "自定义返回字段列表（逗号分隔，如 \"id,title,status,module\"）")
 	bugListCmd.Flags().IntVar(&flagLimit, "limit", 10, "返回数量限制")
 	bugListCmd.Flags().IntVar(&flagPage, "page", 1, "页码")
 
@@ -125,6 +126,10 @@ func init() {
 }
 
 func runBugList(cmd *cobra.Command, args []string) error {
+	fields := "id,title,status,current_owner,severity,modified"
+	if flagFields != "" {
+		fields = flagFields
+	}
 	req := &model.ListBugsRequest{
 		WorkspaceID:   flagWorkspaceID,
 		Title:         flagTitle,
@@ -137,7 +142,7 @@ func runBugList(cmd *cobra.Command, args []string) error {
 		Label:         flagLabel,
 		Reporter:      flagReporter,
 		Order:         flagOrder,
-		Fields:        "id,title,status,current_owner,severity,modified",
+		Fields:        fields,
 		Limit:         flagLimit,
 		Page:          flagPage,
 	}

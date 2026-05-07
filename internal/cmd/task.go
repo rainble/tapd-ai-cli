@@ -74,6 +74,7 @@ func init() {
 	taskListCmd.Flags().StringVar(&flagPriority, "priority", "", "按优先级筛选")
 	taskListCmd.Flags().StringVar(&flagLabel, "label", "", "按标签筛选")
 	taskListCmd.Flags().StringVar(&flagOrder, "order", "", "排序规则（如 \"created desc\"）")
+	taskListCmd.Flags().StringVar(&flagFields, "fields", "", "自定义返回字段列表（逗号分隔，如 \"id,name,status,module\"）")
 	taskListCmd.Flags().IntVar(&flagLimit, "limit", 10, "返回数量限制")
 	taskListCmd.Flags().IntVar(&flagPage, "page", 1, "页码")
 
@@ -117,6 +118,10 @@ func init() {
 }
 
 func runTaskList(cmd *cobra.Command, args []string) error {
+	fields := "id,name,status,owner,modified"
+	if flagFields != "" {
+		fields = flagFields
+	}
 	req := &model.ListTasksRequest{
 		WorkspaceID:   flagWorkspaceID,
 		Name:          flagName,
@@ -127,7 +132,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		PriorityLabel: flagPriority,
 		Label:         flagLabel,
 		Order:         flagOrder,
-		Fields:        "id,name,status,owner,modified",
+		Fields:        fields,
 		Limit:         flagLimit,
 		Page:          flagPage,
 	}
