@@ -2,7 +2,6 @@
 package cmd
 
 import (
-	"context"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -23,7 +22,7 @@ var releaseListCmd = &cobra.Command{
 }
 
 func init() {
-	releaseListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, "高级过滤条件（可重复，格式：field=OP<value>，支持 LIKE/EQ/CONTAINS 等 OpenAPI 特殊查询语法）")
+	releaseListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
 	releaseCmd.AddCommand(releaseListCmd)
 	rootCmd.AddCommand(releaseCmd)
@@ -34,7 +33,7 @@ func runReleaseList(cmd *cobra.Command, args []string) error {
 		WorkspaceID: flagWorkspaceID,
 	}
 
-	releases, err := listWithFilters[model.Release](context.Background(), apiClient, "/releases", req.ToParams(), flagFilter, "Release")
+	releases, err := listWithFilters[model.Release](cmdContext(cmd), apiClient, "/releases", req.ToParams(), flagFilter, "Release")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)

@@ -72,7 +72,7 @@ func init() {
 	iterationUpdateCmd.Flags().StringVar(&flagDescription, "description", "", "新描述")
 	iterationUpdateCmd.Flags().StringVar(&flagStatus, "status", "", "新状态（open/done）")
 
-	iterationListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, "高级过滤条件（可重复，格式：field=OP<value>，支持 LIKE/EQ/CONTAINS 等 OpenAPI 特殊查询语法）")
+	iterationListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
 	iterationCountCmd.Flags().StringVar(&flagStatus, "status", "", "按状态筛选（open/done）")
 
@@ -91,7 +91,7 @@ func runIterationList(cmd *cobra.Command, args []string) error {
 		Limit:       flagLimit,
 		Page:        flagPage,
 	}
-	iterations, err := listWithFilters[model.Iteration](context.Background(), apiClient, "/iterations", req.ToParams(), flagFilter, "Iteration")
+	iterations, err := listWithFilters[model.Iteration](cmdContext(cmd), apiClient, "/iterations", req.ToParams(), flagFilter, "Iteration")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)

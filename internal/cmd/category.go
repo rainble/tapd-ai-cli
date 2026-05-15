@@ -2,7 +2,6 @@
 package cmd
 
 import (
-	"context"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -26,7 +25,7 @@ var categoryListCmd = &cobra.Command{
 
 func init() {
 	categoryListCmd.Flags().StringVar(&flagCategoryName, "name", "", "按名称筛选（支持模糊匹配，如 %搜索词%）")
-	categoryListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, "高级过滤条件（可重复，格式：field=OP<value>，支持 LIKE/EQ/CONTAINS 等 OpenAPI 特殊查询语法）")
+	categoryListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
 	categoryCmd.AddCommand(categoryListCmd)
 	rootCmd.AddCommand(categoryCmd)
@@ -38,7 +37,7 @@ func runCategoryList(cmd *cobra.Command, args []string) error {
 	}
 	addOptionalParam(params, "name", flagCategoryName)
 
-	categories, err := listWithFilters[model.Category](context.Background(), apiClient, "/story_categories", params, flagFilter, "Category")
+	categories, err := listWithFilters[model.Category](cmdContext(cmd), apiClient, "/story_categories", params, flagFilter, "Category")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)

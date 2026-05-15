@@ -108,7 +108,7 @@ func init() {
 	taskUpdateCmd.Flags().StringVar(&flagCurrentUser, "current-user", "", "操作人")
 	taskUpdateCmd.Flags().StringArrayVar(&flagCustomField, "custom-field", nil, "自定义字段（可重复，格式：key=value）")
 
-	taskListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, "高级过滤条件（可重复，格式：field=OP<value>，支持 LIKE/EQ/CONTAINS 等 OpenAPI 特殊查询语法）")
+	taskListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
 	taskCountCmd.Flags().StringVar(&flagStatus, "status", "", "按状态筛选（open/progressing/done）")
 
@@ -138,7 +138,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		Limit:         flagLimit,
 		Page:          flagPage,
 	}
-	tasks, err := listWithFilters[model.Task](context.Background(), apiClient, "/tasks", req.ToParams(), flagFilter, "Task")
+	tasks, err := listWithFilters[model.Task](cmdContext(cmd), apiClient, "/tasks", req.ToParams(), flagFilter, "Task")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)

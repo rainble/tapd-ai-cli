@@ -68,7 +68,7 @@ func init() {
 	timesheetUpdateCmd.Flags().StringVar(&flagTimesheetRemain, "timeremain", "", "剩余工时")
 	timesheetUpdateCmd.Flags().StringVar(&flagTimesheetMemo, "memo", "", "备注")
 
-	timesheetListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, "高级过滤条件（可重复，格式：field=OP<value>，支持 LIKE/EQ/CONTAINS 等 OpenAPI 特殊查询语法）")
+	timesheetListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
 	timesheetCmd.AddCommand(timesheetListCmd, timesheetAddCmd, timesheetUpdateCmd)
 	rootCmd.AddCommand(timesheetCmd)
@@ -83,7 +83,7 @@ func runTimesheetList(cmd *cobra.Command, args []string) error {
 		Limit:       flagLimit,
 		Page:        flagPage,
 	}
-	timesheets, err := listWithFilters[model.Timesheet](context.Background(), apiClient, "/timesheets", req.ToParams(), flagFilter, "Timesheet")
+	timesheets, err := listWithFilters[model.Timesheet](cmdContext(cmd), apiClient, "/timesheets", req.ToParams(), flagFilter, "Timesheet")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)

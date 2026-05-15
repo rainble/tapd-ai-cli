@@ -30,6 +30,9 @@ var (
 
 	// list 命令共享的 filter 标志
 	flagFilter []string
+
+	// filterFlagDesc 是 --filter 标志的描述文本，统一常量避免 13 处重复
+	filterFlagDesc = "高级过滤条件（可重复，格式：field=OP<value>，支持 LIKE/EQ/CONTAINS 等 OpenAPI 特殊查询语法）"
 )
 
 // rootCmd 是 CLI 的根命令
@@ -143,6 +146,17 @@ func initClientAndConfig(cmd *cobra.Command) error {
 	return nil
 }
 
+// cmdContext 安全获取命令的 context，当 cmd 为 nil 或 context 未设置时回退到 context.Background()
+func cmdContext(cmd *cobra.Command) context.Context {
+	if cmd != nil {
+		defer func() { recover() }()
+		if ctx := cmd.Context(); ctx != nil {
+			return ctx
+		}
+	}
+	return context.Background()
+}
+
 // ensureNick 按需获取当前用户昵称，仅在首次调用时发起 HTTP 请求
 func ensureNick() string {
 	if apiClient.GetNick() == "" {
@@ -225,14 +239,36 @@ func parseCustomFields(fields []string) map[string]string {
 	return m
 }
 
-// listWithFilters 是一个泛型辅助函数，用于 list 命令支持 --filter 参数。
-// 它将 request struct 的 ToParams() 结果与 --filter 解析出的额外参数合并，
-// 然后通过 SDK 的 DoGet 方法直接发送请求，再用 ParseList 解析 TAPD 包装响应。
-func listWithFilters[T any](ctx context.Context, client *tapd.Client, endpoint string, params map[string]string, filters []string, wrapperKey string) ([]T, error) {
-	for k, v := range parseCustomFields(filters) {
-		params[k] = v
+// parseFilters 解析 --filter 参数为 map，格式无效时打印警告到 stderr
+func parseFilters(fields []string) map[string]string {
+	if len(fields) == 0 {
+		return nil
 	}
-	data, err := client.DoGet(ctx, endpoint, params)
+	m := make(map[string]string, len(fields))
+	for _, f := range fields {
+		k, v, ok := strings.Cut(f, "=")
+		if !ok || k == "" {
+			fmt.Fprintf(os.Stderr, "warning: skipping invalid filter %q (expected format: key=value)\n", f)
+			continue
+		}
+		m[k] = v
+	}
+	return m
+}
+
+// listWithFilters 是一个泛型辅助函数，用于 list 命令支持 --filter 参数。
+// 它将 request struct 的 ToParams() 结果与 --filter 解析出的额外参数合并到新 map，
+// 然后通过 SDK 的 DoGet 方法直接发送请求，再用 ParseList 解析 TAPD 包装响应。
+// 注意：不会修改传入的 params map；filter 值会覆盖同名 params 键。
+func listWithFilters[T any](ctx context.Context, client *tapd.Client, endpoint string, params map[string]string, filters []string, wrapperKey string) ([]T, error) {
+	merged := make(map[string]string, len(params)+len(filters))
+	for k, v := range params {
+		merged[k] = v
+	}
+	for k, v := range parseFilters(filters) {
+		merged[k] = v
+	}
+	data, err := client.DoGet(ctx, endpoint, merged)
 	if err != nil {
 		return nil, err
 	}

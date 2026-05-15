@@ -132,7 +132,7 @@ func init() {
 	storyUpdateCmd.Flags().StringVar(&flagLabel, "label", "", "新标签（多个以竖线分隔）")
 	storyUpdateCmd.Flags().StringArrayVar(&flagCustomField, "custom-field", nil, "自定义字段（可重复，格式：key=value）")
 
-	storyListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, "高级过滤条件（可重复，格式：field=OP<value>，支持 LIKE/EQ/CONTAINS 等 OpenAPI 特殊查询语法）")
+	storyListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
 	storyCountCmd.Flags().StringVar(&flagStatus, "status", "", "按状态筛选（用 workflow status-map 查询可用值）")
 
@@ -162,7 +162,7 @@ func runStoryList(cmd *cobra.Command, args []string) error {
 		Limit:         flagLimit,
 		Page:          flagPage,
 	}
-	stories, err := listWithFilters[model.Story](context.Background(), apiClient, "/stories", req.ToParams(), flagFilter, "Story")
+	stories, err := listWithFilters[model.Story](cmdContext(cmd), apiClient, "/stories", req.ToParams(), flagFilter, "Story")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)

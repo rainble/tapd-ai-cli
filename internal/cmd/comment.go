@@ -80,7 +80,7 @@ func init() {
 	commentUpdateCmd.Flags().StringVar(&flagDescFile, "file", "", "从本地文件读取评论内容")
 
 	// count 子命令
-	commentListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, "高级过滤条件（可重复，格式：field=OP<value>，支持 LIKE/EQ/CONTAINS 等 OpenAPI 特殊查询语法）")
+	commentListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
 	commentCountCmd.Flags().StringVar(&flagEntryType, "entry-type", "", "评论类型（stories|bug|bug_remark|tasks）")
 	commentCountCmd.Flags().StringVar(&flagEntryID, "entry-id", "", "条目 ID")
@@ -99,7 +99,7 @@ func runCommentList(cmd *cobra.Command, args []string) error {
 		Limit:       flagLimit,
 		Page:        flagPage,
 	}
-	comments, err := listWithFilters[model.Comment](context.Background(), apiClient, "/comments", req.ToParams(), flagFilter, "Comment")
+	comments, err := listWithFilters[model.Comment](cmdContext(cmd), apiClient, "/comments", req.ToParams(), flagFilter, "Comment")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
