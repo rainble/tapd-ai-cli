@@ -143,8 +143,8 @@ func bindLaunchUpdateFlags(cmd *cobra.Command) {
 	cmd.Flags().StringToStringVar(&flagLaunchAliasFields, "alias-field", nil, "别名自定义字段，格式 字段名=value，会提交为 cus_字段名")
 }
 
-func newLaunchListRequest() *model.ListLaunchFormsRequest {
-	return &model.ListLaunchFormsRequest{
+func newLaunchListRequest() *model.GetLaunchFormsRequest {
+	return &model.GetLaunchFormsRequest{
 		WorkspaceID: flagWorkspaceID,
 		ID:          flagLaunchID,
 		Creator:     flagCreator,
@@ -157,15 +157,25 @@ func newLaunchListRequest() *model.ListLaunchFormsRequest {
 	}
 }
 
+func newLaunchCountRequest() *model.CountLaunchFormsRequest {
+	return &model.CountLaunchFormsRequest{
+		WorkspaceID: flagWorkspaceID,
+		ID:          flagLaunchID,
+		Creator:     flagCreator,
+		Title:       flagLaunchTitle,
+		Status:      flagStatus,
+	}
+}
+
 func runLaunchList(cmd *cobra.Command, args []string) error {
-	forms, err := apiClient.ListLaunchForms(context.Background(), newLaunchListRequest())
+	forms, err := apiClient.GetLaunchForms(context.Background(), newLaunchListRequest())
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
 		return nil
 	}
 
-	total, _ := apiClient.CountLaunchForms(context.Background(), newLaunchListRequest())
+	total, _ := apiClient.CountLaunchForms(context.Background(), newLaunchCountRequest())
 	resp := &model.ListResponse{
 		Items:   forms,
 		Total:   total,
@@ -177,7 +187,7 @@ func runLaunchList(cmd *cobra.Command, args []string) error {
 }
 
 func runLaunchCount(cmd *cobra.Command, args []string) error {
-	count, err := apiClient.CountLaunchForms(context.Background(), newLaunchListRequest())
+	count, err := apiClient.CountLaunchForms(context.Background(), newLaunchCountRequest())
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
@@ -210,8 +220,7 @@ func runLaunchCreate(cmd *cobra.Command, args []string) error {
 		SignedBy:       flagLaunchSignedBy,
 		ArchivedBy:     flagLaunchArchivedBy,
 		CC:             flagLaunchCC,
-		CustomFields:   flagLaunchCustomFields,
-		AliasFields:    flagLaunchAliasFields,
+		CustomFields:   mergeCustomAndAliasFields(flagLaunchCustomFields, flagLaunchAliasFields),
 	}
 	form, err := apiClient.CreateLaunchForm(context.Background(), req)
 	if err != nil {
@@ -242,8 +251,7 @@ func runLaunchUpdate(cmd *cobra.Command, args []string) error {
 		ReleaseResult:  flagLaunchReleaseResult,
 		ReleaseComment: flagLaunchReleaseComment,
 		Remark:         flagLaunchRemark,
-		CustomFields:   flagLaunchCustomFields,
-		AliasFields:    flagLaunchAliasFields,
+		CustomFields:   mergeCustomAndAliasFields(flagLaunchCustomFields, flagLaunchAliasFields),
 	}
 	form, err := apiClient.UpdateLaunchForm(context.Background(), req)
 	if err != nil {
@@ -255,7 +263,7 @@ func runLaunchUpdate(cmd *cobra.Command, args []string) error {
 }
 
 func runLaunchTemplates(cmd *cobra.Command, args []string) error {
-	data, err := apiClient.ListLaunchFormTemplates(context.Background(), &model.WorkspaceIDRequest{WorkspaceID: flagWorkspaceID})
+	data, err := apiClient.GetLaunchFormsTemplates(context.Background(), &model.GetLaunchFormsTemplatesRequest{WorkspaceID: flagWorkspaceID})
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
@@ -265,13 +273,29 @@ func runLaunchTemplates(cmd *cobra.Command, args []string) error {
 }
 
 func runLaunchFields(cmd *cobra.Command, args []string) error {
-	data, err := apiClient.GetLaunchFormCustomFields(context.Background(), &model.WorkspaceIDRequest{WorkspaceID: flagWorkspaceID})
+	data, err := apiClient.GetLaunchFormsCustomFieldsSettings(context.Background(), &model.WorkspaceIDRequest{WorkspaceID: flagWorkspaceID})
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
 		return nil
 	}
 	return output.PrintJSON(os.Stdout, data, !flagPretty)
+}
+
+// mergeCustomAndAliasFields 将自定义字段和别名字段合并为一个 map。
+// 别名字段的 key 会加上 "cus_" 前缀。
+func mergeCustomAndAliasFields(custom, alias map[string]string) map[string]string {
+	if len(custom) == 0 && len(alias) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(custom)+len(alias))
+	for k, v := range custom {
+		merged[k] = v
+	}
+	for k, v := range alias {
+		merged["cus_"+k] = v
+	}
+	return merged
 }
 
 func launchFormURL(id string) string {

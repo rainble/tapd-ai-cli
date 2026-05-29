@@ -66,7 +66,7 @@ func TestIntegration_WorkspaceList(t *testing.T) {
 	skipIfNoCredentials(t)
 	c := setupIntegrationClient(t)
 
-	workspaces, err := c.ListWorkspaces(context.Background())
+	workspaces, err := c.ListWorkspaces(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListWorkspaces failed: %v", err)
 	}
@@ -789,7 +789,7 @@ func TestIntegration_ReleaseList_Client(t *testing.T) {
 	c := setupIntegrationClient(t)
 	wsID := os.Getenv("TAPD_WORKSPACE_ID")
 
-	releases, err := c.ListReleases(context.Background(), &model.WorkspaceIDRequest{
+	releases, err := c.ListReleases(context.Background(), &model.ListReleasesRequest{
 		WorkspaceID: wsID,
 	})
 	if err != nil {

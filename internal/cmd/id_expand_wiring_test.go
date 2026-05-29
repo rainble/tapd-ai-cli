@@ -14,6 +14,7 @@ import (
 // captureIDs 记录每次非 /comments 请求中的 id：
 //   - GET（show 系列）从 URL query 取
 //   - POST（update 系列）从表单体取
+//
 // /comments 请求单独记录 entry_id，便于断言 printComments 也用了展开后的 ID
 type captureIDs struct {
 	mainID    string // GetBug/GetStory/GetTask 或 UpdateXxx 收到的 id

@@ -110,17 +110,18 @@ func TestLaunchListAndCount_SendsExpectedQuery(t *testing.T) {
 		if r.URL.Query().Get("workspace_id") != "10104801" {
 			t.Errorf("workspace_id = %q, want 10104801", r.URL.Query().Get("workspace_id"))
 		}
-		if r.URL.Query().Get("release_type") != "正常发布" {
-			t.Errorf("release_type = %q, want 正常发布", r.URL.Query().Get("release_type"))
-		}
-		if r.URL.Query().Get("limit") != "5" {
-			t.Errorf("limit = %q, want 5", r.URL.Query().Get("limit"))
-		}
 		if r.URL.Path == "/launch_forms/count" {
 			return `{"status":1,"data":{"count":1},"info":"success"}`
 		}
 		if r.URL.Path != "/launch_forms" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		// release_type 和 limit 仅在 list 请求中存在
+		if r.URL.Query().Get("release_type") != "正常发布" {
+			t.Errorf("release_type = %q, want 正常发布", r.URL.Query().Get("release_type"))
+		}
+		if r.URL.Query().Get("limit") != "5" {
+			t.Errorf("limit = %q, want 5", r.URL.Query().Get("limit"))
 		}
 		return `{"status":1,"data":[{"LaunchForm":{"id":"lf-1","workspace_id":"10104801","release_type":"正常发布"}}],"info":"success"}`
 	}, func() {
