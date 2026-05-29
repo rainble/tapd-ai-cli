@@ -2,7 +2,6 @@
 package cmd
 
 import (
-	"context"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -23,6 +22,8 @@ var releaseListCmd = &cobra.Command{
 }
 
 func init() {
+	releaseListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
+
 	releaseCmd.AddCommand(releaseListCmd)
 	rootCmd.AddCommand(releaseCmd)
 }
@@ -32,7 +33,7 @@ func runReleaseList(cmd *cobra.Command, args []string) error {
 		WorkspaceID: flagWorkspaceID,
 	}
 
-	releases, err := apiClient.ListReleases(context.Background(), req)
+	releases, err := listWithFilters[model.Release](cmdContext(cmd), apiClient, "/releases", req.ToParams(), flagFilter, "Release")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)

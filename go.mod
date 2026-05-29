@@ -17,4 +17,3 @@ require (
 	golang.org/x/net v0.47.0 // indirect
 )
 
-replace github.com/studyzy/tapd-sdk-go => ../tapd-sdk-go
