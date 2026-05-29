@@ -39,6 +39,18 @@ var workflowLastStepsCmd = &cobra.Command{
 	RunE:  runWorkflowLastSteps,
 }
 
+var workflowFirstStepCmd = &cobra.Command{
+	Use:   "first-step",
+	Short: "获取工作流起始状态",
+	RunE:  runWorkflowFirstStep,
+}
+
+var workflowListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "获取工作流列表",
+	RunE:  runWorkflowList,
+}
+
 func init() {
 	workflowTransitionsCmd.Flags().StringVar(&flagSystem, "system", "", "系统名（story|bug，必需）")
 	workflowTransitionsCmd.Flags().StringVar(&flagWorkitemTypeID, "workitem-type-id", "", "需求类别 ID（必需）")
@@ -49,7 +61,13 @@ func init() {
 	workflowLastStepsCmd.Flags().StringVar(&flagSystem, "system", "", "系统名（story|bug，必需）")
 	workflowLastStepsCmd.Flags().StringVar(&flagWorkitemTypeID, "workitem-type-id", "", "需求类别 ID")
 
-	workflowCmd.AddCommand(workflowTransitionsCmd, workflowStatusMapCmd, workflowLastStepsCmd)
+	workflowFirstStepCmd.Flags().StringVar(&flagSystem, "system", "", "系统名（story|bug，必需）")
+	workflowFirstStepCmd.Flags().StringVar(&flagWorkitemTypeID, "workitem-type-id", "", "需求类别 ID")
+
+	workflowListCmd.Flags().StringVar(&flagSystem, "system", "", "系统名（story|bug，必需）")
+	workflowListCmd.Flags().StringVar(&flagWorkitemTypeID, "workitem-type-id", "", "需求类别 ID")
+
+	workflowCmd.AddCommand(workflowTransitionsCmd, workflowStatusMapCmd, workflowLastStepsCmd, workflowFirstStepCmd, workflowListCmd)
 	rootCmd.AddCommand(workflowCmd)
 }
 
@@ -117,6 +135,54 @@ func runWorkflowLastSteps(cmd *cobra.Command, args []string) error {
 	}
 
 	data, err := apiClient.GetWorkflowLastSteps(context.Background(), req)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, data, !flagPretty)
+}
+
+func runWorkflowFirstStep(cmd *cobra.Command, args []string) error {
+	if flagSystem == "" {
+		output.PrintError(os.Stderr, "missing_parameter",
+			"--system is required",
+			"Usage: tapd workflow first-step --system <story|bug>")
+		os.Exit(output.ExitParamError)
+		return nil
+	}
+
+	req := &model.WorkflowRequest{
+		WorkspaceID:    flagWorkspaceID,
+		System:         flagSystem,
+		WorkitemTypeID: flagWorkitemTypeID,
+	}
+
+	data, err := apiClient.GetWorkflowFirstStep(context.Background(), req)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, data, !flagPretty)
+}
+
+func runWorkflowList(cmd *cobra.Command, args []string) error {
+	if flagSystem == "" {
+		output.PrintError(os.Stderr, "missing_parameter",
+			"--system is required",
+			"Usage: tapd workflow list --system <story|bug>")
+		os.Exit(output.ExitParamError)
+		return nil
+	}
+
+	req := &model.WorkflowRequest{
+		WorkspaceID:    flagWorkspaceID,
+		System:         flagSystem,
+		WorkitemTypeID: flagWorkitemTypeID,
+	}
+
+	data, err := apiClient.GetWorkflows(context.Background(), req)
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)

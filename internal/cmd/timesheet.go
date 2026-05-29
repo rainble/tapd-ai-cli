@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/studyzy/tapd-ai-cli/internal/output"
@@ -19,6 +20,7 @@ var (
 	flagTimesheetDate       string
 	flagTimesheetOwner      string
 	flagTimesheetMemo       string
+	flagTimesheetCostIDs    string
 )
 
 // timesheetCmd 是 timesheet 父命令
@@ -46,6 +48,18 @@ var timesheetUpdateCmd = &cobra.Command{
 	RunE:  runTimesheetUpdate,
 }
 
+var timesheetCountCmd = &cobra.Command{
+	Use:   "count",
+	Short: "查询花费工时数量",
+	RunE:  runTimesheetCount,
+}
+
+var timesheetDeleteCmd = &cobra.Command{
+	Use:   "delete",
+	Short: "删除花费工时",
+	RunE:  runTimesheetDelete,
+}
+
 func init() {
 	// list 子命令
 	timesheetListCmd.Flags().StringVar(&flagTimesheetEntityType, "entity-type", "", "实体类型（story|task|bug）")
@@ -70,7 +84,17 @@ func init() {
 
 	timesheetListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
-	timesheetCmd.AddCommand(timesheetListCmd, timesheetAddCmd, timesheetUpdateCmd)
+	// count 子命令
+	timesheetCountCmd.Flags().StringVar(&flagTimesheetEntityType, "entity-type", "", "实体类型（story|task|bug）")
+	timesheetCountCmd.Flags().StringVar(&flagTimesheetEntityID, "entity-id", "", "实体 ID")
+	timesheetCountCmd.Flags().StringVar(&flagTimesheetOwner, "owner", "", "按工时填写人筛选")
+
+	// delete 子命令
+	timesheetDeleteCmd.Flags().StringVar(&flagTimesheetEntityType, "entity-type", "", "实体类型（story|task|bug，必需）")
+	timesheetDeleteCmd.Flags().StringVar(&flagTimesheetEntityID, "entity-id", "", "实体 ID（必需）")
+	timesheetDeleteCmd.Flags().StringVar(&flagTimesheetCostIDs, "cost-ids", "", "工时记录 ID（多个以逗号分隔，必需）")
+
+	timesheetCmd.AddCommand(timesheetListCmd, timesheetAddCmd, timesheetUpdateCmd, timesheetCountCmd, timesheetDeleteCmd)
 	rootCmd.AddCommand(timesheetCmd)
 }
 
@@ -142,6 +166,45 @@ func runTimesheetUpdate(cmd *cobra.Command, args []string) error {
 		Memo:        flagTimesheetMemo,
 	}
 	result, err := apiClient.UpdateTimesheet(context.Background(), req)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, result, !flagPretty)
+}
+
+func runTimesheetCount(cmd *cobra.Command, args []string) error {
+	req := &model.CountTimesheetsRequest{
+		WorkspaceID: flagWorkspaceID,
+		EntityType:  flagTimesheetEntityType,
+		EntityID:    flagTimesheetEntityID,
+		Owner:       flagTimesheetOwner,
+	}
+	count, err := apiClient.CountTimesheets(context.Background(), req)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, &model.CountResponse{Count: count}, !flagPretty)
+}
+
+func runTimesheetDelete(cmd *cobra.Command, args []string) error {
+	if flagTimesheetEntityType == "" || flagTimesheetEntityID == "" || flagTimesheetCostIDs == "" {
+		output.PrintError(os.Stderr, "missing_parameter",
+			"--entity-type, --entity-id and --cost-ids are required",
+			"Usage: tapd timesheet delete --entity-type <type> --entity-id <id> --cost-ids <id1,id2>")
+		os.Exit(output.ExitParamError)
+		return nil
+	}
+	req := &model.DeleteTimesheetsRequest{
+		WorkspaceID: flagWorkspaceID,
+		EntityType:  flagTimesheetEntityType,
+		EntityID:    flagTimesheetEntityID,
+		CostIDs:     strings.Split(flagTimesheetCostIDs, ","),
+	}
+	result, err := apiClient.DeleteTimesheets(context.Background(), req)
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)

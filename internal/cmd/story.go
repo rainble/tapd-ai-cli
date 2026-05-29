@@ -341,6 +341,7 @@ func readDescription() (string, error) {
 		}
 	}
 	if content != "" {
+		content = resolveLocalImages(content)
 		content = markdownToHTML(content)
 	}
 	return content, nil

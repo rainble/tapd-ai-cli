@@ -60,6 +60,12 @@ var wikiUpdateCmd = &cobra.Command{
 	RunE: runWikiUpdate,
 }
 
+var wikiCountCmd = &cobra.Command{
+	Use:   "count",
+	Short: "查询 Wiki 文档数量",
+	RunE:  runWikiCount,
+}
+
 func init() {
 	wikiListCmd.Flags().IntVar(&flagLimit, "limit", 10, "返回数量限制")
 	wikiListCmd.Flags().IntVar(&flagPage, "page", 1, "页码")
@@ -79,7 +85,7 @@ func init() {
 	wikiUpdateCmd.Flags().StringVar(&flagWikiNote, "note", "", "新备注")
 	wikiUpdateCmd.Flags().StringVar(&flagParentWiki, "parent-wiki-id", "", "新父 Wiki ID")
 
-	wikiCmd.AddCommand(wikiListCmd, wikiShowCmd, wikiCreateCmd, wikiUpdateCmd)
+	wikiCmd.AddCommand(wikiListCmd, wikiShowCmd, wikiCreateCmd, wikiUpdateCmd, wikiCountCmd)
 	rootCmd.AddCommand(wikiCmd)
 }
 
@@ -210,4 +216,17 @@ func runWikiUpdate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return printSuccessResponse(wiki.ID, fmt.Sprintf("%s/%s/markdown_wikis/view/%s", apiClient.WebURL(), flagWorkspaceID, wiki.ID), "")
+}
+
+func runWikiCount(cmd *cobra.Command, args []string) error {
+	req := &model.CountWikisRequest{
+		WorkspaceID: flagWorkspaceID,
+	}
+	count, err := apiClient.CountWikis(context.Background(), req)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, &model.CountResponse{Count: count}, !flagPretty)
 }

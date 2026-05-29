@@ -77,13 +77,21 @@ var launchFieldsCmd = &cobra.Command{
 	RunE:  runLaunchFields,
 }
 
+var launchLogsCmd = &cobra.Command{
+	Use:   "logs",
+	Short: "查询发布评审活动日志",
+	RunE:  runLaunchLogs,
+}
+
 func init() {
 	bindLaunchListFlags(launchListCmd)
 	bindLaunchCountFlags(launchCountCmd)
 	bindLaunchCreateFlags(launchCreateCmd)
 	bindLaunchUpdateFlags(launchUpdateCmd)
 
-	launchCmd.AddCommand(launchListCmd, launchCountCmd, launchCreateCmd, launchUpdateCmd, launchTemplatesCmd, launchFieldsCmd)
+	launchLogsCmd.Flags().StringVar(&flagLaunchID, "id", "", "发布评审 ID（必需）")
+
+	launchCmd.AddCommand(launchListCmd, launchCountCmd, launchCreateCmd, launchUpdateCmd, launchTemplatesCmd, launchFieldsCmd, launchLogsCmd)
 	rootCmd.AddCommand(launchCmd)
 }
 
@@ -296,6 +304,26 @@ func mergeCustomAndAliasFields(custom, alias map[string]string) map[string]strin
 		merged["cus_"+k] = v
 	}
 	return merged
+}
+
+func runLaunchLogs(cmd *cobra.Command, args []string) error {
+	if flagLaunchID == "" {
+		output.PrintError(os.Stderr, "missing_parameter", "--id is required",
+			"Usage: tapd launch logs --id <launch_form_id>")
+		os.Exit(output.ExitParamError)
+		return nil
+	}
+	req := &model.GetLaunchFormsActivityLogsRequest{
+		WorkspaceID: flagWorkspaceID,
+		FormID:      flagLaunchID,
+	}
+	logs, err := apiClient.GetLaunchFormsActivityLogs(context.Background(), req)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, logs, !flagPretty)
 }
 
 func launchFormURL(id string) string {
