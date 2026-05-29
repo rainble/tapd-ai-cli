@@ -7,7 +7,7 @@ require (
 	github.com/gomarkdown/markdown v0.0.0-20260412113850-134a5b2cce7f
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
-	github.com/studyzy/tapd-sdk-go v0.6.0
+	github.com/studyzy/tapd-sdk-go v0.6.1-0.20260529090820-0ee00324ce16
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -16,4 +16,3 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 )
-
