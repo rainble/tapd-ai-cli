@@ -4,6 +4,7 @@ package cmd
 import (
 	"context"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/studyzy/tapd-ai-cli/internal/output"
@@ -11,11 +12,17 @@ import (
 )
 
 var (
-	flagMessage  string
-	flagWebURL   string
-	flagRef      string
-	flagObjectID string
-	flagCommitID string
+	flagMessage    string
+	flagWebURL     string
+	flagRef        string
+	flagObjectID   string
+	flagCommitID   string
+	flagAuthor     string
+	flagFiles      string
+	flagRepo       string
+	flagRepoID     string
+	flagCommitTime string
+	flagCommitURL  string
 )
 
 // sourceCmd 是 source 父命令
@@ -44,7 +51,14 @@ var sourceObjectsCmd = &cobra.Command{
 
 func init() {
 	sourceAddCmd.Flags().StringVar(&flagMessage, "message", "", "提交信息（必需）")
+	sourceAddCmd.Flags().StringVar(&flagAuthor, "author", "", "提交人")
+	sourceAddCmd.Flags().StringVar(&flagCommitID, "commit-id", "", "提交 ID")
+	sourceAddCmd.Flags().StringVar(&flagFiles, "files", "", "变更文件（逗号分隔）")
+	sourceAddCmd.Flags().StringVar(&flagRepo, "repo", "", "仓库名")
+	sourceAddCmd.Flags().StringVar(&flagRepoID, "repo-id", "", "仓库 ID")
+	sourceAddCmd.Flags().StringVar(&flagCommitTime, "commit-time", "", "提交时间")
 	sourceAddCmd.Flags().StringVar(&flagWebURL, "web-url", "", "仓库链接")
+	sourceAddCmd.Flags().StringVar(&flagCommitURL, "commit-url", "", "提交链接")
 	sourceAddCmd.Flags().StringVar(&flagRef, "ref", "", "分支引用")
 
 	sourceListCmd.Flags().StringVar(&flagObjectID, "object-id", "", "TAPD 业务对象 ID（必需）")
@@ -66,11 +80,22 @@ func runSourceAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	var files []string
+	if flagFiles != "" {
+		files = strings.Split(flagFiles, ",")
+	}
 	req := &model.AddCodeCommitInfoRequest{
 		WorkspaceID: flagWorkspaceID,
 		Message:     flagMessage,
+		Author:      flagAuthor,
+		CommitID:    flagCommitID,
+		Files:       files,
+		Repo:        flagRepo,
+		RepoID:      flagRepoID,
+		CommitTime:  flagCommitTime,
 		Ref:         flagRef,
 		RepoURL:     flagWebURL,
+		CommitURL:   flagCommitURL,
 	}
 
 	data, err := apiClient.AddCodeCommitInfo(context.Background(), req)

@@ -42,5 +42,11 @@ func runReportList(cmd *cobra.Command, args []string) error {
 		os.Exit(output.ExitAPIError)
 		return nil
 	}
-	return output.PrintJSON(os.Stdout, data, !flagPretty)
+	resp := &model.ListResponse{
+		Items: data,
+		Total: len(data),
+		Page:  flagPage,
+		Limit: flagLimit,
+	}
+	return output.PrintJSON(os.Stdout, resp, !flagPretty)
 }

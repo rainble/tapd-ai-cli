@@ -43,7 +43,7 @@ func newCmds2Handler(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(path, "/workflows/first_step"):
 		w.Write([]byte(`{"status":1,"data":{"open":"新建"}}`))
 	case strings.HasSuffix(path, "/workflows"):
-		w.Write([]byte(`{"status":1,"data":{}}`))
+		w.Write([]byte(`{"status":1,"data":[{"Workflow":{"id":"1","name":"默认工作流","system_name":"story"}}]}`))
 
 	// ===== source =====
 	case strings.HasSuffix(path, "/code_commit_infos"):
@@ -101,7 +101,7 @@ func newCmds2Handler(w http.ResponseWriter, r *http.Request) {
 
 	// ===== report =====
 	case strings.HasSuffix(path, "/workspace_reports"):
-		w.Write([]byte(`{"status":1,"data":{}}`))
+		w.Write([]byte(`{"status":1,"data":[{"WorkspaceReport":{"id":"1","name":"周报"}}]}`))
 
 	// ===== wiki =====
 	case strings.HasSuffix(path, "/tapd_wikis/count"):

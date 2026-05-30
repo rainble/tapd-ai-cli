@@ -188,5 +188,9 @@ func runWorkflowList(cmd *cobra.Command, args []string) error {
 		os.Exit(output.ExitAPIError)
 		return nil
 	}
-	return output.PrintJSON(os.Stdout, data, !flagPretty)
+	resp := &model.ListResponse{
+		Items: data,
+		Total: len(data),
+	}
+	return output.PrintJSON(os.Stdout, resp, !flagPretty)
 }

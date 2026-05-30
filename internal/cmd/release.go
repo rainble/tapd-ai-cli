@@ -45,8 +45,8 @@ func init() {
 	releaseListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
 	releaseCreateCmd.Flags().StringVar(&flagName, "name", "", "发布计划名称（必需）")
-	releaseCreateCmd.Flags().StringVar(&flagStartDate, "startdate", "", "开始日期（格式：2006-01-02）")
-	releaseCreateCmd.Flags().StringVar(&flagEndDate, "enddate", "", "结束日期（格式：2006-01-02）")
+	releaseCreateCmd.Flags().StringVar(&flagStartDate, "startdate", "", "开始日期（格式：2006-01-02，必需）")
+	releaseCreateCmd.Flags().StringVar(&flagEndDate, "enddate", "", "结束日期（格式：2006-01-02，必需）")
 	releaseCreateCmd.Flags().StringVar(&flagDescription, "description", "", "描述")
 
 	releaseUpdateCmd.Flags().StringVar(&flagName, "name", "", "发布计划名称")
@@ -63,7 +63,7 @@ func runReleaseList(cmd *cobra.Command, args []string) error {
 		WorkspaceID: flagWorkspaceID,
 	}
 
-	releases, err := listWithFilters[model.Release](cmdContext(cmd), apiClient, "/releases", req.ToParams(), flagFilter, "Release")
+	releases, err := listWithFilters[model.Release](cmdContext(cmd), apiClient, "/new_releases", req.ToParams(), flagFilter, "Release")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
@@ -73,9 +73,9 @@ func runReleaseList(cmd *cobra.Command, args []string) error {
 }
 
 func runReleaseCreate(cmd *cobra.Command, args []string) error {
-	if flagName == "" {
+	if flagName == "" || flagStartDate == "" || flagEndDate == "" {
 		output.PrintError(os.Stderr, "missing_parameter",
-			"--name is required",
+			"--name, --startdate and --enddate are required",
 			"Usage: tapd release create --name <name> --startdate <date> --enddate <date>")
 		os.Exit(output.ExitParamError)
 		return nil
