@@ -72,11 +72,20 @@ tapd
 ├── task  list | show <id> | create | update <id> | count
 ├── bug   list | show <id> | create | update <id> | count
 ├── iteration list
-└── iteration list
+├── watch [--endpoint <url>] [--token <tok>] [--exec <cmd>] [--once]
+├── mcp                                # stdio MCP server，供 AI 客户端接入
+└── ...
 
 全局标志：--workspace-id <id>，--pretty
 --help 输出紧凑命令参考卡（供 AI Agent 自发现）
 ```
+
+`watch` 子命令通过 SSE 订阅外部中转服务推送的 TAPD webhook 事件流，
+不需要 TAPD API 凭据，自己读 `watch_endpoint` / `subscribe_token` 配置项。
+
+`mcp` 子命令以 stdio JSON-RPC 模式运行（Model Context Protocol），把 SDK 的
+读写能力以 tool 形式暴露给 Claude Code / Cursor 等客户端。复用 ~/.tapd.json
+与环境变量，工具实现位于 `internal/mcp/`。
 
 ### 核心设计原则
 

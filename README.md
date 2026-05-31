@@ -113,6 +113,9 @@ tapd url https://www.tapd.cn/tapd_fe/51081496/story/detail/1151081496001028684
 # 查询 Wiki 文档列表
 tapd wiki list
 
+# 订阅 TAPD webhook 事件流（需要服务端中转 SSE，详见下文）
+tapd watch --endpoint https://your-host/x/upower/tapd/events --token <subscribe-token>
+
 # 查看所有命令参考（AI 自发现）
 tapd --help
 ```
@@ -135,6 +138,8 @@ tapd
 ├── relation  bugs | create
 ├── skill     init
 ├── url       <tapd-url>
+├── watch     [--endpoint <url>] [--token <tok>] [--exec <cmd>] [--once]
+├── mcp                                   # 以 stdio MCP server 模式运行
 └── ...       release, attachment, image, category, custom-field, story-field, workitem-type, commit-msg, qiwei
 ```
 
@@ -149,6 +154,104 @@ tapd skill init
 支持的工具：Claude Code、CodeBuddy、Cursor、Windsurf、Trae、Codex、Gemini CLI、Cline、Roo Code、Augment。
 
 命令会自动检测当前目录下已有的工具配置文件夹并默认选中，交互式确认后生成 SKILL.md。生成的命令参考部分从当前 CLI 版本的命令树动态生成，始终保持同步。
+
+## MCP 集成（tapd mcp）
+
+`tapd mcp` 把 CLI 转成一个 stdio MCP server，让 AI 客户端（Claude Code、Cursor、Codex）
+直接通过 [Model Context Protocol](https://modelcontextprotocol.io) 调用 TAPD，
+不需要额外部署。
+
+凭据复用 `~/.tapd.json` 与环境变量，客户端配置只指向二进制：
+
+```jsonc
+// Claude Code: ~/.claude/mcp_servers.json
+// Cursor: ~/.cursor/mcp.json
+{
+  "mcpServers": {
+    "tapd": {
+      "command": "tapd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+首批暴露的工具：
+
+| 工具 | 用途 |
+|------|------|
+| `tapd_workspace_list` | 列出当前用户的全部项目 |
+| `tapd_url_resolve` | 粘 TAPD URL，自动识别 story/bug/task/wiki 并返回详情 |
+| `tapd_story_list` / `tapd_story_show` / `tapd_story_update` | 需求查/看/改（状态/迭代/优先级等） |
+| `tapd_bug_list` / `tapd_bug_show` / `tapd_bug_create` | 缺陷查/看/建 |
+| `tapd_task_list` / `tapd_task_show` | 任务查/看 |
+| `tapd_iteration_list` | 迭代列表 |
+| `tapd_comment_list` / `tapd_comment_add` | 评论查/写（需要 entry_type + entry_id） |
+
+配置过 `workspace switch <id>` 后，工具的 `workspace_id` 参数可省略——
+mcp server 会自动用默认工作区兜底。
+
+## 订阅 webhook 事件流（tapd watch）
+
+`tapd watch` 通过 SSE 长连接订阅 TAPD webhook 事件流。整体架构：
+
+```
+TAPD SaaS  ──HTTPS POST──▶  你的中转服务  ──SSE──▶  团队成员的 tapd watch
+            (HMAC 签名)     (公网域名)              (本地长连接)
+```
+
+中转服务负责接收 TAPD 推送、HMAC 校验、并把事件 fan-out 给所有订阅者。
+开源仓库 [`tapd-webhook-relay`](#) 提供了一个最小实现，也可以集成到你已有的内部服务里。
+
+CLI 端配置：
+
+```bash
+# 通过 flag
+tapd watch \
+  --endpoint https://your-host/x/upower/tapd/events \
+  --token <subscribe-token>
+
+# 或写到 ~/.tapd.json
+{
+  "watch_endpoint": "https://your-host/x/upower/tapd/events",
+  "subscribe_token": "<subscribe-token>"
+}
+
+# 也可以用环境变量
+export TAPD_WATCH_ENDPOINT=...
+export TAPD_SUBSCRIBE_TOKEN=...
+```
+
+每收到一个事件，watch 会写一行紧凑 JSON 到 stdout：
+
+```json
+{"id":12,"received_at":1717000000000000000,"event":{...原始 webhook payload...}}
+```
+
+可选 `--exec` 把事件喂给外部命令（事件 JSON 通过 stdin 传入）：
+
+```bash
+tapd watch --exec './handle.sh'
+```
+
+可选 `--filter` 在客户端过滤事件，规则格式 `<点路径>=<glob>[,<glob>...]`。
+多个 `--filter` 之间是 AND，单个 `--filter` 内多个 glob 之间是 OR：
+
+```bash
+# 只关心 story 创建/更新
+tapd watch --filter event.event=story_create,story_update
+
+# 只看某个工作区，且 priority 为 High 的需求事件
+tapd watch \
+  --filter event.workspace_id=20063271 \
+  --filter event.story.priority=High
+
+# 数组里命中任一元素也算匹配
+tapd watch --filter event.tags=urgent
+```
+
+支持的字段路径根是 watch 输出的整体 JSON（含 `id`、`received_at`、`event.*`）。
+glob 用 `*` / `?` / `[abc]` 通配，逗号要转义时写 `\,`。
 
 ## 全局标志
 
