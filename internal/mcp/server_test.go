@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	tapd "github.com/studyzy/tapd-sdk-go"
 )
 
 // TestInitializeHandshake 验证 initialize 返回协议版本和 server info。
@@ -165,13 +167,67 @@ func TestParseError(t *testing.T) {
 	}
 }
 
+// TestNoCredentials_HandshakeStillWorks client=nil 时握手与 tools/list 仍然正常，
+// 这是 Claude Code 等客户端能看到 server 起来的关键。
+func TestNoCredentials_HandshakeStillWorks(t *testing.T) {
+	resps := runOnce(t, []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+	})
+	if len(resps) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(resps))
+	}
+	for i, r := range resps {
+		if r["error"] != nil {
+			t.Fatalf("response %d should succeed without creds, got error: %v", i, r["error"])
+		}
+	}
+}
+
+// TestNoCredentials_ToolCallReturnsIsError 缺凭据调用工具时返回 isError content + 登录提示。
+func TestNoCredentials_ToolCallReturnsIsError(t *testing.T) {
+	pr, pw := io.Pipe()
+	out := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	server := NewServer(pr, syncBuffer{out}, stderr, nil) // client = nil
+	// 注册一个真实的工具——不需要真的能跑，只要走到客户端预检
+	RegisterDefaultTools(server, "")
+
+	done := make(chan error, 1)
+	go func() { done <- server.Run(context.Background()) }()
+
+	io.WriteString(pw, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tapd_workspace_list","arguments":{}}}`+"\n")
+	pw.Close()
+	<-done
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &resp); err != nil {
+		t.Fatalf("invalid resp: %v\n%s", err, out.String())
+	}
+	if resp["error"] != nil {
+		t.Fatalf("should not be RPC error, want isError content; got: %v", resp["error"])
+	}
+	res := resp["result"].(map[string]interface{})
+	if res["isError"] != true {
+		t.Fatalf("isError must be true, got: %v", res)
+	}
+	content := res["content"].([]interface{})
+	text := content[0].(map[string]interface{})["text"].(string)
+	if !strings.Contains(text, "tapd auth login") {
+		t.Fatalf("error text should hint login, got: %q", text)
+	}
+}
+
 // ─── helpers ───
 
 func newTestServer() (*Server, io.WriteCloser, *bytes.Buffer, chan error) {
 	pr, pw := io.Pipe()
 	out := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	server := NewServer(pr, syncBuffer{out}, stderr, nil)
+	// 桩工具不发真实 HTTP，但 server 现在要求 client != nil 才放行 tools/call；
+	// 这里给一个非 nil 的 client，使 stub 路径仍可被测试覆盖。
+	stubClient := tapd.NewClient("stub-token", "", "")
+	server := NewServer(pr, syncBuffer{out}, stderr, stubClient)
 	done := make(chan error, 1)
 	go func() {
 		done <- server.Run(context.Background())

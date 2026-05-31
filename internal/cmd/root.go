@@ -45,6 +45,13 @@ var rootCmd = &cobra.Command{
 			appConfig = cfg
 			return nil
 		}
+		// mcp 是 stdio server：缺凭据时不强制退出，server 仍正常起动，
+		// 真正调用 TAPD 的 tool 会以 isError content 形式提示登录。
+		// 让客户端（Claude Code 等）能看到 server 启动 + 工具列表。
+		if cmd.Name() == "mcp" {
+			initClientAndConfigBestEffort()
+			return nil
+		}
 		// --version 不需要认证
 		if v, _ := cmd.Flags().GetBool("version"); v {
 			return nil
@@ -145,6 +152,40 @@ func initClientAndConfig(cmd *cobra.Command) error {
 	}
 
 	return nil
+}
+
+// initClientAndConfigBestEffort 给 mcp 用的"宽松版"初始化：
+//   - 加载配置文件（失败仅记日志，不退出）
+//   - 命令行标志覆盖配置后，凭据齐全才构造 apiClient；不齐全则 apiClient 保持 nil
+//   - 同步默认 workspace_id 到 flagWorkspaceID，仍允许为空
+//
+// 与 initClientAndConfig 的区别：任何缺失都不调用 os.Exit。
+func initClientAndConfigBestEffort() {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		// 配置文件读失败不致命；mcp 仍可启动空状态，让客户端能看到 server 起来
+		return
+	}
+	appConfig = cfg
+
+	accessToken := flagAccessToken
+	apiUser := flagAPIUser
+	apiPassword := flagAPIPassword
+	if accessToken == "" {
+		accessToken = cfg.AccessToken
+	}
+	if apiUser == "" {
+		apiUser = cfg.APIUser
+	}
+	if apiPassword == "" {
+		apiPassword = cfg.APIPassword
+	}
+	if accessToken != "" || (apiUser != "" && apiPassword != "") {
+		apiClient = tapd.NewClientWithBaseURL(cfg.APIBaseURL, cfg.BaseURL, accessToken, apiUser, apiPassword)
+	}
+	if flagWorkspaceID == "" {
+		flagWorkspaceID = cfg.WorkspaceID
+	}
 }
 
 // ensureNick 按需获取当前用户昵称，仅在首次调用时发起 HTTP 请求

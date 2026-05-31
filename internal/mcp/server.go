@@ -191,6 +191,9 @@ func (s *Server) handleToolsList(req rpcRequest) {
 }
 
 // handleToolsCall 执行一个具体工具，把返回值包装成 MCP content。
+//
+// 当前所有工具都需要 TAPD client；client 缺失时直接以 isError content 回包，
+// 不让请求穿透到 handler。这样客户端只把"凭据缺失"当成可恢复错误，不影响协议握手。
 func (s *Server) handleToolsCall(ctx context.Context, req rpcRequest) {
 	var p struct {
 		Name      string          `json:"name"`
@@ -205,16 +208,17 @@ func (s *Server) handleToolsCall(ctx context.Context, req rpcRequest) {
 		s.writeError(req.ID, errMethodNotFound, "tool not found: "+p.Name)
 		return
 	}
+	if s.client == nil {
+		s.writeIsErrorText(req.ID,
+			"TAPD credentials not configured: please run 'tapd auth login --access-token <token>' "+
+				"(or set TAPD_ACCESS_TOKEN), then restart the MCP server.")
+		return
+	}
 	result, err := tool.Handler(ctx, p.Arguments)
 	if err != nil {
 		// 工具内部错误按 MCP 约定回包成 isError=true 的 content，
 		// 这样模型能看到错误信息并自行重试或换工具调用，而不是 RPC 层错误中断。
-		s.writeResult(req.ID, map[string]interface{}{
-			"content": []interface{}{
-				map[string]interface{}{"type": "text", "text": err.Error()},
-			},
-			"isError": true,
-		})
+		s.writeIsErrorText(req.ID, err.Error())
 		return
 	}
 	text, err := stringifyResult(result)
@@ -226,6 +230,16 @@ func (s *Server) handleToolsCall(ctx context.Context, req rpcRequest) {
 		"content": []interface{}{
 			map[string]interface{}{"type": "text", "text": text},
 		},
+	})
+}
+
+// writeIsErrorText 写一条 isError=true 的 MCP content 响应。
+func (s *Server) writeIsErrorText(id json.RawMessage, text string) {
+	s.writeResult(id, map[string]interface{}{
+		"content": []interface{}{
+			map[string]interface{}{"type": "text", "text": text},
+		},
+		"isError": true,
 	})
 }
 

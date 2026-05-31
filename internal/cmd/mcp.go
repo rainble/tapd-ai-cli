@@ -13,7 +13,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/studyzy/tapd-ai-cli/internal/mcp"
-	"github.com/studyzy/tapd-ai-cli/internal/output"
 )
 
 // mcpCmd 启动 stdio MCP server。
@@ -43,15 +42,11 @@ func init() {
 }
 
 // runMCP 启动 server。stdin/stdout 走协议，stderr 打日志，绝不能反过来。
+//
+// 凭据缺失不退出：MCP 客户端（Claude Code 等）启动子进程后，需要看到 server
+// 完成 initialize 握手并列出工具，否则会判定 server 失败并不再展示工具入口。
+// 真正调用 TAPD 的工具在 apiClient 为 nil 时返回 isError content，引导用户登录。
 func runMCP(cmd *cobra.Command, args []string) error {
-	if apiClient == nil {
-		output.PrintError(os.Stderr, "authentication_required",
-			"MCP server requires TAPD credentials",
-			"run 'tapd auth login --access-token <token>' or set TAPD_ACCESS_TOKEN env var")
-		os.Exit(output.ExitAuthError)
-		return nil
-	}
-
 	defaultWorkspace := flagWorkspaceID
 	if defaultWorkspace == "" && appConfig != nil {
 		defaultWorkspace = appConfig.WorkspaceID
@@ -63,7 +58,13 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	fmt.Fprintf(os.Stderr, "tapd-mcp: server started, default workspace=%q\n", defaultWorkspace)
+	if apiClient == nil {
+		fmt.Fprintf(os.Stderr,
+			"tapd-mcp: server started without credentials, "+
+				"TAPD tools will return isError until you run 'tapd auth login'\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "tapd-mcp: server started, default workspace=%q\n", defaultWorkspace)
+	}
 	if err := server.Run(ctx); err != nil && ctx.Err() == nil {
 		fmt.Fprintf(os.Stderr, "tapd-mcp: server stopped with err: %v\n", err)
 	}
