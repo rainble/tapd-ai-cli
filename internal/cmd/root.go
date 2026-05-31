@@ -39,6 +39,12 @@ var rootCmd = &cobra.Command{
 		if cmd.Name() == "login" || cmd.Name() == "init" {
 			return nil
 		}
+		// watch 不需要 TAPD API 凭据，自己读 watch_endpoint/subscribe_token
+		if cmd.Name() == "watch" {
+			cfg, _ := config.LoadConfig()
+			appConfig = cfg
+			return nil
+		}
 		// --version 不需要认证
 		if v, _ := cmd.Flags().GetBool("version"); v {
 			return nil
@@ -129,6 +135,7 @@ func initClientAndConfig(cmd *cobra.Command) error {
 	}
 	needsWorkspace := !skipWorkspace[parentName] &&
 		cmd.Name() != "url" &&
+		cmd.Name() != "mcp" &&
 		!(cmd.Name() == "list" && parentName == "workspace")
 	if needsWorkspace && flagWorkspaceID == "" {
 		output.PrintError(os.Stderr, "workspace_required",
