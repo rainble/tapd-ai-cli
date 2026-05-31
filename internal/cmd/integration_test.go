@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/studyzy/tapd-ai-cli/internal/config"
+	"github.com/studyzy/tapd-ai-cli/internal/tapdurl"
 	tapd "github.com/studyzy/tapd-sdk-go"
 	"github.com/studyzy/tapd-sdk-go/model"
 )
@@ -480,9 +481,9 @@ func TestIntegration_URLCommand_StoryURL(t *testing.T) {
 	storyURL := "https://www.tapd.cn/tapd_fe/" + wsID + "/story/detail/" + storyID
 
 	// 验证 URL 解析
-	parsed, err := parseTAPDURL(storyURL)
+	parsed, err := tapdurl.Parse(storyURL)
 	if err != nil {
-		t.Fatalf("parseTAPDURL(%q) failed: %v", storyURL, err)
+		t.Fatalf("tapdurl.Parse(%q) failed: %v", storyURL, err)
 	}
 	if parsed.EntityType != "story" {
 		t.Errorf("EntityType = %q, want %q", parsed.EntityType, "story")
@@ -702,9 +703,9 @@ func TestIntegration_URLCommand_WikiURL(t *testing.T) {
 	wikiURL := "https://www.tapd.cn/" + wsID + "/markdown_wikis/show/#" + wikiID
 
 	// 验证 URL 解析
-	parsed, err := parseTAPDURL(wikiURL)
+	parsed, err := tapdurl.Parse(wikiURL)
 	if err != nil {
-		t.Fatalf("parseTAPDURL(%q) failed: %v", wikiURL, err)
+		t.Fatalf("tapdurl.Parse(%q) failed: %v", wikiURL, err)
 	}
 	if parsed.EntityType != "wiki" {
 		t.Errorf("EntityType = %q, want %q", parsed.EntityType, "wiki")

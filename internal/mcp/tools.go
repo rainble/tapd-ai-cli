@@ -11,9 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"strings"
 
+	"github.com/studyzy/tapd-ai-cli/internal/tapdurl"
 	"github.com/studyzy/tapd-sdk-go/model"
 )
 
@@ -123,22 +122,22 @@ func toolURLResolve(s *Server, ws func(string) string) *Tool {
 			if err != nil {
 				return nil, err
 			}
-			workspaceID, entityType, entityID, err := parseTapdURL(rawURL)
+			parsed, err := tapdurl.Parse(rawURL)
 			if err != nil {
 				return nil, err
 			}
-			workspaceID = orFallback(workspaceID, ws(""))
-			switch entityType {
+			workspaceID := orFallback(parsed.WorkspaceID, ws(""))
+			switch parsed.EntityType {
 			case "story":
-				return s.client.GetStory(ctx, workspaceID, entityID)
+				return s.client.GetStory(ctx, workspaceID, parsed.EntityID)
 			case "bug":
-				return s.client.GetBug(ctx, workspaceID, entityID)
+				return s.client.GetBug(ctx, workspaceID, parsed.EntityID)
 			case "task":
-				return s.client.GetTask(ctx, workspaceID, entityID)
+				return s.client.GetTask(ctx, workspaceID, parsed.EntityID)
 			case "wiki":
-				return s.client.GetWiki(ctx, workspaceID, entityID)
+				return s.client.GetWiki(ctx, workspaceID, parsed.EntityID)
 			default:
-				return nil, fmt.Errorf("unsupported entity type %q", entityType)
+				return nil, fmt.Errorf("unsupported entity type %q", parsed.EntityType)
 			}
 		},
 	}
@@ -623,87 +622,4 @@ func orFallback(primary, fallback string) string {
 		return primary
 	}
 	return fallback
-}
-
-// parseTapdURL 是 cmd/url.go 解析逻辑的精简版——MCP 包独立实现以避免循环依赖。
-// 仅支持 detail 路径与 dialog_preview_id；wiki fragment 用 #id 形式。
-func parseTapdURL(rawURL string) (workspaceID, entityType, entityID string, err error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", "", "", fmt.Errorf("invalid URL: %w", err)
-	}
-	segs := splitNonEmpty(u.Path)
-	if len(segs) == 0 {
-		return "", "", "", fmt.Errorf("empty URL path")
-	}
-
-	// dialog_preview_id 格式：?dialog_preview_id={type}_{id}
-	if pv := u.Query().Get("dialog_preview_id"); pv != "" {
-		entityType, entityID, err = splitPreviewID(pv)
-		if err != nil {
-			return "", "", "", err
-		}
-		workspaceID = extractWorkspaceID(segs)
-		return workspaceID, entityType, entityID, nil
-	}
-	// wiki: /{ws}/markdown_wikis/show/#{id}
-	if containsSeg(segs, "markdown_wikis") {
-		workspaceID = extractWorkspaceID(segs)
-		entityID = strings.TrimSpace(u.Fragment)
-		if entityID == "" {
-			return "", "", "", fmt.Errorf("wiki URL missing #id")
-		}
-		return workspaceID, "wiki", entityID, nil
-	}
-	// detail 路径
-	for i, s := range segs {
-		if s == "detail" && i > 0 && i+1 < len(segs) {
-			t := segs[i-1]
-			id := segs[i+1]
-			switch t {
-			case "story", "bug", "task":
-				return extractWorkspaceID(segs), t, id, nil
-			}
-		}
-	}
-	return "", "", "", fmt.Errorf("cannot identify entity from URL %q", rawURL)
-}
-
-func splitNonEmpty(p string) []string {
-	out := []string{}
-	for _, s := range strings.Split(p, "/") {
-		if s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func containsSeg(ss []string, target string) bool {
-	for _, s := range ss {
-		if s == target {
-			return true
-		}
-	}
-	return false
-}
-
-func extractWorkspaceID(segs []string) string {
-	if len(segs) == 0 {
-		return ""
-	}
-	if segs[0] == "tapd_fe" && len(segs) >= 2 {
-		return segs[1]
-	}
-	return segs[0]
-}
-
-func splitPreviewID(pv string) (entityType, entityID string, err error) {
-	for _, t := range []string{"story", "bug", "task"} {
-		prefix := t + "_"
-		if strings.HasPrefix(pv, prefix) {
-			return t, strings.TrimPrefix(pv, prefix), nil
-		}
-	}
-	return "", "", fmt.Errorf("unknown preview id %q", pv)
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/studyzy/tapd-ai-cli/internal/tapdurl"
 )
 
 func TestParseTAPDURL(t *testing.T) {
@@ -110,15 +111,15 @@ func TestParseTAPDURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseTAPDURL(tt.rawURL)
+			got, err := tapdurl.Parse(tt.rawURL)
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("parseTAPDURL(%q) expected error, got nil", tt.rawURL)
+					t.Errorf("tapdurl.Parse(%q) expected error, got nil", tt.rawURL)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("parseTAPDURL(%q) unexpected error: %v", tt.rawURL, err)
+				t.Fatalf("tapdurl.Parse(%q) unexpected error: %v", tt.rawURL, err)
 			}
 			if got.WorkspaceID != tt.wantWorkspaceID {
 				t.Errorf("WorkspaceID = %q, want %q", got.WorkspaceID, tt.wantWorkspaceID)
