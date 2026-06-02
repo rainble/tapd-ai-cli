@@ -436,7 +436,6 @@ func TestRunBugUpdate_PassesNewFlags(t *testing.T) {
 	defer cleanup()
 
 	flagCC = "cc_user"
-	flagIterationID = "iter002"
 	flagModule = "模块B"
 	flagLabel = "fix"
 	flagBegin = "2026-04-01"
@@ -455,9 +454,6 @@ func TestRunBugUpdate_PassesNewFlags(t *testing.T) {
 	}
 	if captured.Get("cc") != "cc_user" {
 		t.Errorf("cc = %q, want %q", captured.Get("cc"), "cc_user")
-	}
-	if captured.Get("iteration_id") != "iter002" {
-		t.Errorf("iteration_id = %q, want %q", captured.Get("iteration_id"), "iter002")
 	}
 	if captured.Get("current_user") != "updater" {
 		t.Errorf("current_user = %q, want %q", captured.Get("current_user"), "updater")
@@ -1040,7 +1036,7 @@ func TestNewFlagsRegistered_BugCreate(t *testing.T) {
 }
 
 func TestNewFlagsRegistered_BugUpdate(t *testing.T) {
-	for _, name := range []string{"cc", "iteration-id", "module", "label", "begin", "due", "current-user", "resolution", "custom-field"} {
+	for _, name := range []string{"cc", "module", "label", "begin", "due", "current-user", "resolution", "custom-field"} {
 		if bugUpdateCmd.Flags().Lookup(name) == nil {
 			t.Errorf("bug update should register --%s", name)
 		}

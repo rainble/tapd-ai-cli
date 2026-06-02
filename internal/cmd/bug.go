@@ -109,7 +109,6 @@ func init() {
 	bugUpdateCmd.Flags().StringVar(&flagSeverity, "severity", "", "新严重程度（fatal/serious/normal/prompt/advice）")
 	bugUpdateCmd.Flags().StringVar(&flagOwner, "owner", "", "新处理人（current_owner）")
 	bugUpdateCmd.Flags().StringVar(&flagCC, "cc", "", "新抄送人")
-	bugUpdateCmd.Flags().StringVar(&flagIterationID, "iteration-id", "", "新迭代 ID")
 	bugUpdateCmd.Flags().StringVar(&flagModule, "module", "", "新模块")
 	bugUpdateCmd.Flags().StringVar(&flagLabel, "label", "", "新标签（多个以竖线分隔）")
 	bugUpdateCmd.Flags().StringVar(&flagBegin, "begin", "", "新预计开始日期（格式：2006-01-02）")
@@ -248,7 +247,6 @@ func runBugUpdate(cmd *cobra.Command, args []string) error {
 		Severity:      flagSeverity,
 		CurrentOwner:  flagOwner,
 		CC:            flagCC,
-		IterationID:   flagIterationID,
 		Module:        flagModule,
 		Label:         flagLabel,
 		Begin:         flagBegin,

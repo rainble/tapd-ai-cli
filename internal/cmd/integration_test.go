@@ -950,8 +950,8 @@ func TestIntegration_CategoryList_Client(t *testing.T) {
 	c := setupIntegrationClient(t)
 	wsID := os.Getenv("TAPD_WORKSPACE_ID")
 
-	categories, err := c.ListCategories(context.Background(), map[string]string{
-		"workspace_id": wsID,
+	categories, err := c.ListCategories(context.Background(), &model.ListStoryCategoriesRequest{
+		WorkspaceID: wsID,
 	})
 	if err != nil {
 		t.Fatalf("ListCategories failed: %v", err)
