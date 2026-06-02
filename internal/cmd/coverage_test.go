@@ -45,6 +45,66 @@ func resetFlags() {
 	flagJSON = false
 	flagPretty = false
 	flagNoComments = true // 默认不输出评论避免额外请求
+
+	// testx 共享 flags
+	flagTxNamespace = ""
+	flagTxRepoUid = ""
+	flagTxRepoVersionUid = ""
+	flagTxFolderUid = ""
+	flagTxCaseUid = ""
+	flagTxPlanUid = ""
+	flagTxIssueUid = ""
+	flagTxUid = ""
+	flagTxReportUid = ""
+	flagTxTemplateUid = ""
+	flagTxData = ""
+	flagTxOffset = 0
+	flagTxLimit = 0
+
+	// testx case flags
+	flagTxCaseSearch = ""
+	flagTxCaseReverse = false
+	flagTxCaseExecOrdering = ""
+	flagTxCaseRevSource = ""
+	flagTxCaseRevMainUid = ""
+	flagTxCaseRevSrcKind = ""
+	flagTxCaseRevSrcUid = ""
+	flagTxCaseRevIsLast = false
+	flagTxCaseBugStatus = ""
+	flagTxCaseBugPriority = ""
+	flagTxCaseBugHandler = ""
+	flagTxCaseBugName = ""
+
+	// testx plan flags
+	flagTxPlanWithStatistic = false
+	flagTxPlanWithDetail = ""
+	flagTxPlanWithDescend = false
+	flagTxPlanWithAncestor = false
+	flagTxPlanName = ""
+	flagTxPlanArchive = ""
+	flagTxPlanStates = nil
+	flagTxPlanItemType = ""
+	flagTxPlanIssueType = ""
+	flagTxPlanRelatedTypes = nil
+	flagTxPlanStatus = ""
+	flagTxPlanSummary = ""
+	flagTxPlanBugId = ""
+
+	// testx report flags
+	flagTxReportSearch = ""
+	flagTxReportStartAt = ""
+	flagTxReportEndAt = ""
+	flagTxReportCreators = nil
+	flagTxReportPlanUids = nil
+	flagTxReportWithAssoc = false
+	flagTxReportTemplate = ""
+	flagTxReportSource = ""
+	flagTxReportSources = nil
+
+	// testx design flags
+	flagTxDesignUid = ""
+	flagTxDesignKind = ""
+	flagTxDesignName = ""
 }
 
 // setupMockServer 创建 mock HTTP server，根据请求路径返回对应的 JSON

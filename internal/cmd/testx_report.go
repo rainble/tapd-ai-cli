@@ -11,15 +11,15 @@ import (
 )
 
 var (
-	flagTxReportSearch     string
-	flagTxReportStartAt    string
-	flagTxReportEndAt      string
-	flagTxReportCreators   []string
-	flagTxReportPlanUids   []string
-	flagTxReportWithAssoc  bool
-	flagTxReportTemplate   string
-	flagTxReportSource     string
-	flagTxReportSources    []string
+	flagTxReportSearch    string
+	flagTxReportStartAt   string
+	flagTxReportEndAt     string
+	flagTxReportCreators  []string
+	flagTxReportPlanUids  []string
+	flagTxReportWithAssoc bool
+	flagTxReportTemplate  string
+	flagTxReportSource    string
+	flagTxReportSources   []string
 )
 
 // testxReportCmd 是 testx report 父命令
