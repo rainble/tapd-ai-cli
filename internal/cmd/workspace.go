@@ -63,7 +63,7 @@ func init() {
 }
 
 func runWorkspaceList(cmd *cobra.Command, args []string) error {
-	workspaces, err := apiClient.ListWorkspaces(context.Background(), "")
+	workspaces, err := apiClient.ListWorkspaces(context.Background(), "", apiClient.GetNick())
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "Check your credentials and network connection.")
 		os.Exit(output.ExitAPIError)
