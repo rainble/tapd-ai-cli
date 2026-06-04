@@ -111,11 +111,14 @@ func truncateOutput(s string, limit int) string {
 	return s[:limit] + "\n...[truncated]"
 }
 
-func gitWorkingTreeDirty(ctx context.Context, runner commandRunner, repo string) (bool, string, error) {
+func gitWorkingTreeDirty(ctx context.Context, runner commandRunner, repo string, limit int) (bool, string, error) {
+	if limit <= 0 {
+		limit = defaultCommandOutputLimit
+	}
 	res := runner.Run(ctx, commandRunConfig{
 		Dir:     repo,
 		Command: "git status --porcelain",
-		Limit:   12288,
+		Limit:   limit,
 	})
 	if res.Err != nil {
 		return false, commandFailureDetail(res), res.Err

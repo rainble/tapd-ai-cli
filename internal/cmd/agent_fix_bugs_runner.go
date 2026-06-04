@@ -63,7 +63,7 @@ func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) 
 	}
 
 	if !w.allowDirty {
-		dirty, out, err := gitWorkingTreeDirty(ctx, w.runner, w.repo)
+		dirty, out, err := gitWorkingTreeDirty(ctx, w.runner, w.repo, limit)
 		if err != nil {
 			return w.fail(ctx, result, "dirty_check", err.Error(), limit)
 		}
@@ -102,6 +102,7 @@ func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) 
 
 	comment := buildSuccessComment(agent, test, verified)
 	if err := w.tapd.AddBugComment(ctx, target.WorkspaceID, target.BugID, comment); err != nil {
+		result.Verified = verified
 		if statusErr := w.updateFailureStatus(ctx, result); statusErr != nil {
 			return w.failNoComment(result, "status_update", statusUpdateFailureDetail(w.onFailureStatus, statusErr, "comment", err.Error()), limit)
 		}

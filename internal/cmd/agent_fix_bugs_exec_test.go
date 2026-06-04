@@ -27,7 +27,7 @@ func TestGitWorkingTreeDirty(t *testing.T) {
 		}
 		return commandRunResult{Stdout: " M file.go\n", ExitCode: 0}
 	})
-	dirty, out, err := gitWorkingTreeDirty(context.Background(), runner, dir)
+	dirty, out, err := gitWorkingTreeDirty(context.Background(), runner, dir, defaultCommandOutputLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestGitWorkingTreeDirtyErrorDetail(t *testing.T) {
 			Err:      errors.New("exit status 128"),
 		}
 	})
-	dirty, detail, err := gitWorkingTreeDirty(context.Background(), runner, dir)
+	dirty, detail, err := gitWorkingTreeDirty(context.Background(), runner, dir, defaultCommandOutputLimit)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -57,6 +57,23 @@ func TestGitWorkingTreeDirtyErrorDetail(t *testing.T) {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("detail missing %q:\n%s", want, detail)
 		}
+	}
+}
+
+func TestGitWorkingTreeDirtyUsesConfiguredLimit(t *testing.T) {
+	dir := t.TempDir()
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		if cfg.Limit != 16 {
+			t.Fatalf("limit=%d, want 16", cfg.Limit)
+		}
+		return commandRunResult{Stdout: " M file.go\n", ExitCode: 0}
+	})
+	dirty, out, err := gitWorkingTreeDirty(context.Background(), runner, dir, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dirty || out != " M file.go\n" {
+		t.Fatalf("dirty=%v out=%q", dirty, out)
 	}
 }
 

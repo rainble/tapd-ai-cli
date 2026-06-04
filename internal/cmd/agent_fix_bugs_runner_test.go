@@ -247,11 +247,46 @@ func TestBugFixWorkerSuccessCommentFailureAttemptsFailureStatus(t *testing.T) {
 		outputLimit:     1024,
 	}
 	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
-	if res.Status != "failed" || res.Stage != "comment" {
+	if res.Status != "failed" || res.Stage != "comment" || !res.Verified {
 		t.Fatalf("result=%+v", res)
 	}
 	if len(tapd.updates) != 1 || tapd.updates[0].Status != "reopened" {
 		t.Fatalf("updates=%+v", tapd.updates)
+	}
+}
+
+func TestBugFixWorkerSuccessCommentAndFailureStatusFailureKeepsVerified(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}, failComment: true, failUpdateStatus: true}
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		switch cfg.Command {
+		case "git status --porcelain":
+			return commandRunResult{}
+		case "agent":
+			return commandRunResult{Stdout: "changed"}
+		case "go test ./...":
+			return commandRunResult{Stdout: "ok"}
+		default:
+			t.Fatalf("unexpected command %q", cfg.Command)
+			return commandRunResult{}
+		}
+	})
+	worker := bugFixWorker{
+		tapd:            tapd,
+		runner:          runner,
+		repo:            "/repo",
+		agentCmd:        "agent",
+		testCmd:         "go test ./...",
+		onFailureStatus: "reopened",
+		outputLimit:     1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "failed" || res.Stage != "status_update" || !res.Verified {
+		t.Fatalf("result=%+v", res)
+	}
+	for _, want := range []string{"comment", "boom"} {
+		if !strings.Contains(res.Detail, want) {
+			t.Fatalf("detail=%q missing %q", res.Detail, want)
+		}
 	}
 }
 
@@ -281,5 +316,38 @@ func TestBugFixWorkerDefaultOutputLimitTruncatesFailureDetail(t *testing.T) {
 	}
 	if len(res.Detail) >= len(longDirty) {
 		t.Fatalf("detail len=%d, want less than %d", len(res.Detail), len(longDirty))
+	}
+}
+
+func TestBugFixWorkerDirtyRepoUsesSmallOutputLimit(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	longDirty := " M " + strings.Repeat("x", 80)
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		if cfg.Command != "git status --porcelain" {
+			t.Fatalf("agent/test should not run when dirty: %q", cfg.Command)
+			return commandRunResult{}
+		}
+		if cfg.Limit != 16 {
+			t.Fatalf("git status limit=%d, want 16", cfg.Limit)
+		}
+		return commandRunResult{Stdout: truncateOutput(longDirty, cfg.Limit)}
+	})
+	worker := bugFixWorker{
+		tapd:        tapd,
+		runner:      runner,
+		repo:        "/repo",
+		agentCmd:    "agent",
+		testCmd:     "go test ./...",
+		outputLimit: 16,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "failed" || res.Stage != "dirty_repo" {
+		t.Fatalf("result=%+v", res)
+	}
+	if !strings.Contains(res.Detail, "...[truncated]") || len(res.Detail) >= len(longDirty) {
+		t.Fatalf("detail=%q", res.Detail)
+	}
+	if len(tapd.comments) != 1 || !strings.Contains(tapd.comments[0], "...[truncated]") {
+		t.Fatalf("comments=%v", tapd.comments)
 	}
 }
