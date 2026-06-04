@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 )
+
+const defaultCommandOutputLimit = 12288
 
 // commandRunConfig 描述一次本地命令执行。
 type commandRunConfig struct {
@@ -39,13 +42,17 @@ func (f commandRunnerFunc) Run(ctx context.Context, cfg commandRunConfig) comman
 type shellCommandRunner struct{}
 
 func (shellCommandRunner) Run(ctx context.Context, cfg commandRunConfig) commandRunResult {
+	limit := cfg.Limit
+	if limit <= 0 {
+		limit = defaultCommandOutputLimit
+	}
 	cmd := exec.CommandContext(ctx, "sh", "-c", cfg.Command)
 	cmd.Dir = cfg.Dir
 	cmd.Stdin = strings.NewReader(cfg.Stdin)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := newBoundedOutput(limit)
+	stderr := newBoundedOutput(limit)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	err := cmd.Run()
 	exitCode := 0
 	if err != nil {
@@ -54,17 +61,48 @@ func (shellCommandRunner) Run(ctx context.Context, cfg commandRunConfig) command
 			exitCode = ee.ExitCode()
 		}
 	}
-	limit := cfg.Limit
-	if limit <= 0 {
-		limit = 12288
-	}
 	return commandRunResult{
-		Stdout:   truncateOutput(stdout.String(), limit),
-		Stderr:   truncateOutput(stderr.String(), limit),
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
 		ExitCode: exitCode,
 		Err:      err,
 	}
 }
+
+type boundedOutput struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func newBoundedOutput(limit int) *boundedOutput {
+	return &boundedOutput{limit: limit}
+}
+
+func (w *boundedOutput) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if w.buf.Len() < w.limit {
+		remaining := w.limit - w.buf.Len()
+		if len(p) <= remaining {
+			_, _ = w.buf.Write(p)
+			return len(p), nil
+		}
+		_, _ = w.buf.Write(p[:remaining])
+	}
+	w.truncated = true
+	return len(p), nil
+}
+
+func (w *boundedOutput) String() string {
+	if w.truncated {
+		return w.buf.String() + "\n...[truncated]"
+	}
+	return w.buf.String()
+}
+
+var _ io.Writer = (*boundedOutput)(nil)
 
 func truncateOutput(s string, limit int) string {
 	if limit <= 0 || len(s) <= limit {
@@ -80,9 +118,24 @@ func gitWorkingTreeDirty(ctx context.Context, runner commandRunner, repo string)
 		Limit:   12288,
 	})
 	if res.Err != nil {
-		return false, strings.TrimSpace(res.Stderr), res.Err
+		return false, commandFailureDetail(res), res.Err
 	}
 	return strings.TrimSpace(res.Stdout) != "", res.Stdout, nil
+}
+
+func commandFailureDetail(res commandRunResult) string {
+	var b strings.Builder
+	if res.Err != nil {
+		fmt.Fprintf(&b, "Error: %s\n", res.Err)
+	}
+	fmt.Fprintf(&b, "Exit code: %d", res.ExitCode)
+	if res.Stdout != "" {
+		fmt.Fprintf(&b, "\nStdout:\n%s", res.Stdout)
+	}
+	if res.Stderr != "" {
+		fmt.Fprintf(&b, "\nStderr:\n%s", res.Stderr)
+	}
+	return b.String()
 }
 
 // bugFixBugDetail 是 agent prompt 所需的缺陷详情快照。
@@ -130,7 +183,7 @@ func buildAgentPrompt(bug bugFixBugDetail, repo, testCmd string) string {
 }
 
 func buildSuccessComment(agent commandRunResult, test commandRunResult, verified bool) string {
-	return fmt.Sprintf("AI agent finished bug fix.\n\nVerified: %v\n\nAgent stdout:\n%s\n\nAgent stderr:\n%s\n\nTest stdout:\n%s\n\nTest stderr:\n%s",
+	return fmt.Sprintf("AI agent run completed.\n\nVerified: %v\n\nAgent stdout:\n%s\n\nAgent stderr:\n%s\n\nTest stdout:\n%s\n\nTest stderr:\n%s",
 		verified, agent.Stdout, agent.Stderr, test.Stdout, test.Stderr)
 }
 

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,30 @@ func TestGitWorkingTreeDirty(t *testing.T) {
 	}
 	if !dirty || out != " M file.go\n" {
 		t.Fatalf("dirty=%v out=%q", dirty, out)
+	}
+}
+
+func TestGitWorkingTreeDirtyErrorDetail(t *testing.T) {
+	dir := t.TempDir()
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		return commandRunResult{
+			Stdout:   "partial stdout\n",
+			Stderr:   "fatal stderr\n",
+			ExitCode: 128,
+			Err:      errors.New("exit status 128"),
+		}
+	})
+	dirty, detail, err := gitWorkingTreeDirty(context.Background(), runner, dir)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if dirty {
+		t.Fatal("dirty should be false on command error")
+	}
+	for _, want := range []string{"exit status 128", "Exit code: 128", "partial stdout", "fatal stderr"} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("detail missing %q:\n%s", want, detail)
+		}
 	}
 }
 
@@ -87,5 +112,38 @@ func TestShellCommandRunner(t *testing.T) {
 	}
 	if string(data) != "payload" {
 		t.Fatalf("stdin file=%q", data)
+	}
+}
+
+func TestShellCommandRunnerTruncatesStdoutAndStderr(t *testing.T) {
+	runner := shellCommandRunner{}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	res := runner.Run(ctx, commandRunConfig{
+		Command: "printf abcdef; printf 123456 >&2",
+		Limit:   4,
+	})
+	if res.Stdout != "abcd\n...[truncated]" {
+		t.Fatalf("stdout=%q", res.Stdout)
+	}
+	if res.Stderr != "1234\n...[truncated]" {
+		t.Fatalf("stderr=%q", res.Stderr)
+	}
+}
+
+func TestBuildSuccessCommentUnverified(t *testing.T) {
+	comment := buildSuccessComment(
+		commandRunResult{Stdout: "agent out"},
+		commandRunResult{Stderr: "test err"},
+		false,
+	)
+	if !strings.Contains(comment, "AI agent run completed") {
+		t.Fatalf("comment missing neutral headline:\n%s", comment)
+	}
+	if strings.Contains(comment, "finished bug fix") {
+		t.Fatalf("comment has misleading headline:\n%s", comment)
+	}
+	if !strings.Contains(comment, "Verified: false") {
+		t.Fatalf("comment missing verification status:\n%s", comment)
 	}
 }
