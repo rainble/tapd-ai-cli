@@ -139,6 +139,7 @@ tapd
 ├── skill     init
 ├── url       <tapd-url>
 ├── watch     [--endpoint <url>] [--token <tok>] [--exec <cmd>] [--once]
+├── agent     fix-bugs --repo <path> [--test-cmd <cmd>] [--on-success-status <status>]
 ├── mcp                                   # 以 stdio MCP server 模式运行
 └── ...       release, attachment, image, category, custom-field, story-field, workitem-type, commit-msg, qiwei
 ```
@@ -252,6 +253,36 @@ tapd watch --filter event.tags=urgent
 
 支持的字段路径根是 watch 输出的整体 JSON（含 `id`、`received_at`、`event.*`）。
 glob 用 `*` / `?` / `[abc]` 通配，逗号要转义时写 `\,`。
+
+## 自动修复 TAPD Bug（tapd agent fix-bugs）
+
+`tapd agent fix-bugs` 在本地运行，订阅 TAPD webhook SSE，只处理 bug 创建/更新事件。
+命令会拉取 bug 详情，调用本地 coding agent 修改 `--repo` 指向的仓库，运行 `--test-cmd`
+验证，然后给 bug 写评论。只有配置了 `--on-success-status` 时才会自动流转状态。
+
+推荐先用一次性、无状态流转模式试跑：
+
+```bash
+tapd agent fix-bugs \
+  --repo /Users/sunruoyu/go/src/vas/app/upower \
+  --test-cmd "go test ./..." \
+  --on-start-status "" \
+  --on-success-status "" \
+  --once
+```
+
+确认评论和本地修改符合预期后，再开启状态流转：
+
+```bash
+tapd agent fix-bugs \
+  --repo /Users/sunruoyu/go/src/vas/app/upower \
+  --test-cmd "go test ./..." \
+  --on-start-status in_progress \
+  --on-success-status resolved
+```
+
+默认要求工作区干净；如果 `git status --porcelain` 有输出，命令会跳过自动修复并写 TAPD 评论。
+命令不会自动 commit、push、创建 MR、部署或合并。
 
 ## 全局标志
 
