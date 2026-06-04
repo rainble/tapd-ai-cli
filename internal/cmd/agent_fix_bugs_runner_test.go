@@ -119,7 +119,9 @@ func TestBugFixWorkerSkipsDirtyRepo(t *testing.T) {
 
 func TestBugFixWorkerTestFailure(t *testing.T) {
 	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	var commands []string
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		commands = append(commands, cfg.Command)
 		switch cfg.Command {
 		case "git status --porcelain":
 			return commandRunResult{}
@@ -144,6 +146,15 @@ func TestBugFixWorkerTestFailure(t *testing.T) {
 	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
 	if res.Status != "failed" || res.Stage != "test" {
 		t.Fatalf("result=%+v", res)
+	}
+	wantCommands := []string{"git status --porcelain", "agent", "go test ./..."}
+	if len(commands) < len(wantCommands) {
+		t.Fatalf("commands=%v, want at least %v", commands, wantCommands)
+	}
+	for i, want := range wantCommands {
+		if commands[i] != want {
+			t.Fatalf("commands=%v, want prefix %v", commands, wantCommands)
+		}
 	}
 	if len(tapd.updates) != 0 {
 		t.Fatalf("success status should not update on test failure: %+v", tapd.updates)
