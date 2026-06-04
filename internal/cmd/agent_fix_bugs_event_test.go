@@ -58,20 +58,27 @@ func TestExtractBugEventTarget(t *testing.T) {
 			wantBugID: "789",
 		},
 		{
+			name:      "large numeric ids",
+			payload:   `{"id":4,"received_at":1,"event":{"event":"bug::create","workspace_id":9007199254740993,"bug":{"id":9007199254740995}}}`,
+			wantOK:    true,
+			wantWS:    "9007199254740993",
+			wantBugID: "9007199254740995",
+		},
+		{
 			name:       "story skipped",
-			payload:    `{"id":4,"received_at":1,"event":{"event":"story::create","workspace_id":"123","story":{"id":"456"}}}`,
+			payload:    `{"id":5,"received_at":1,"event":{"event":"story::create","workspace_id":"123","story":{"id":"456"}}}`,
 			wantOK:     false,
 			wantReason: "not_bug_event",
 		},
 		{
 			name:       "missing workspace",
-			payload:    `{"id":5,"received_at":1,"event":{"event":"bug::create","bug":{"id":"456"}}}`,
+			payload:    `{"id":6,"received_at":1,"event":{"event":"bug::create","bug":{"id":"456"}}}`,
 			wantOK:     false,
 			wantReason: "missing_workspace_id",
 		},
 		{
 			name:       "missing bug id",
-			payload:    `{"id":6,"received_at":1,"event":{"event":"bug::create","workspace_id":"123"}}`,
+			payload:    `{"id":7,"received_at":1,"event":{"event":"bug::create","workspace_id":"123"}}`,
 			wantOK:     false,
 			wantReason: "missing_bug_id",
 		},
@@ -93,6 +100,35 @@ func TestExtractBugEventTarget(t *testing.T) {
 				if got.WorkspaceID != tc.wantWS || got.BugID != tc.wantBugID || got.EventID != ev.ID {
 					t.Fatalf("target=%+v want workspace=%s bug=%s event=%d", got, tc.wantWS, tc.wantBugID, ev.ID)
 				}
+			}
+		})
+	}
+}
+
+func TestExtractBugEventTargetRejectsInvalidEvents(t *testing.T) {
+	cases := []struct {
+		name       string
+		ev         *streamEvent
+		wantReason string
+	}{
+		{
+			name:       "nil event",
+			wantReason: "nil_event",
+		},
+		{
+			name:       "invalid payload",
+			ev:         &streamEvent{ID: 1, Event: json.RawMessage(`{`)},
+			wantReason: "invalid_payload",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok, reason := extractBugEventTarget(tc.ev)
+			if ok {
+				t.Fatal("ok=true want=false")
+			}
+			if reason != tc.wantReason {
+				t.Fatalf("reason=%q want=%q", reason, tc.wantReason)
 			}
 		})
 	}

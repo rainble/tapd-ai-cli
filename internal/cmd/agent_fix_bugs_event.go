@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -30,7 +31,9 @@ func extractBugEventTarget(ev *streamEvent) (bugEventTarget, bool, string) {
 		return bugEventTarget{}, false, "nil_event"
 	}
 	var payload map[string]interface{}
-	if err := json.Unmarshal(ev.Event, &payload); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(ev.Event))
+	decoder.UseNumber()
+	if err := decoder.Decode(&payload); err != nil {
 		return bugEventTarget{}, false, "invalid_payload"
 	}
 	eventName := stringifyBugEventValue(payload["event"])
@@ -41,7 +44,7 @@ func extractBugEventTarget(ev *streamEvent) (bugEventTarget, bool, string) {
 	if workspaceID == "" {
 		return bugEventTarget{}, false, "missing_workspace_id"
 	}
-	bugID := firstPathString(payload, [][]string{
+	bugID := firstBugEventPathString(payload, [][]string{
 		{"bug", "id"},
 		{"object", "id"},
 		{"id"},
@@ -54,9 +57,9 @@ func extractBugEventTarget(ev *streamEvent) (bugEventTarget, bool, string) {
 	return bugEventTarget{WorkspaceID: workspaceID, BugID: bugID, EventID: ev.ID}, true, ""
 }
 
-func firstPathString(root map[string]interface{}, paths [][]string) string {
+func firstBugEventPathString(root map[string]interface{}, paths [][]string) string {
 	for _, path := range paths {
-		if v, ok := lookupPath(root, path); ok {
+		if v, ok := lookupBugEventPath(root, path); ok {
 			if s := stringifyBugEventValue(v); s != "" {
 				return s
 			}
@@ -65,7 +68,7 @@ func firstPathString(root map[string]interface{}, paths [][]string) string {
 	return ""
 }
 
-func lookupPath(root map[string]interface{}, path []string) (interface{}, bool) {
+func lookupBugEventPath(root map[string]interface{}, path []string) (interface{}, bool) {
 	var cur interface{} = root
 	for _, part := range path {
 		obj, ok := cur.(map[string]interface{})
