@@ -143,6 +143,7 @@ func initClientAndConfig(cmd *cobra.Command) error {
 	needsWorkspace := !skipWorkspace[parentName] &&
 		cmd.Name() != "url" &&
 		cmd.Name() != "mcp" &&
+		!(cmd.Name() == "fix-bugs" && parentName == "agent") &&
 		!(cmd.Name() == "list" && parentName == "workspace")
 	if needsWorkspace && flagWorkspaceID == "" {
 		output.PrintError(os.Stderr, "workspace_required",
