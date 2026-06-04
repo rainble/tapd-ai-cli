@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/studyzy/tapd-sdk-go/model"
 )
 
 // bugFixTapdClient 抽象 TAPD 读写，生产实现包装 SDK，测试使用 fake。
@@ -179,4 +181,64 @@ func statusUpdateFailureDetail(status string, err error, originalStage, original
 		detail += fmt.Sprintf("\n\nOriginal stage: %s\n\nOriginal detail:\n%s", originalStage, originalDetail)
 	}
 	return detail
+}
+
+// sdkBugFixTapdClient 把 tapd-sdk-go Client 适配成 bugFixTapdClient。
+type sdkBugFixTapdClient struct{}
+
+func (sdkBugFixTapdClient) GetBugDetail(ctx context.Context, workspaceID, bugID string) (bugFixBugDetail, error) {
+	bug, err := apiClient.GetBug(ctx, workspaceID, bugID)
+	if err != nil {
+		return bugFixBugDetail{}, err
+	}
+	comments, _ := apiClient.ListComments(ctx, &model.ListCommentsRequest{
+		WorkspaceID: workspaceID,
+		EntryType:   "bug",
+		EntryID:     bugID,
+	})
+	mapped := bugFixBugDetail{
+		WorkspaceID:  workspaceID,
+		ID:           bug.ID,
+		Title:        bug.Title,
+		Status:       bug.Status,
+		CurrentOwner: bug.CurrentOwner,
+		Severity:     bug.Severity,
+		Priority:     bug.PriorityLabel,
+		Description:  htmlToMarkdown(bug.Description),
+	}
+	for _, c := range comments {
+		mapped.Comments = append(mapped.Comments, bugFixComment{
+			Author:      c.Author,
+			Created:     c.Created,
+			Description: htmlToMarkdown(c.Description),
+		})
+	}
+	return mapped, nil
+}
+
+func (sdkBugFixTapdClient) AddBugComment(ctx context.Context, workspaceID, bugID, description string) error {
+	author := ensureNick()
+	_, err := apiClient.AddComment(ctx, &model.AddCommentRequest{
+		WorkspaceID: workspaceID,
+		EntryType:   "bug",
+		EntryID:     bugID,
+		Description: description,
+		Author:      author,
+	})
+	return err
+}
+
+func (sdkBugFixTapdClient) UpdateBugStatus(ctx context.Context, update bugStatusUpdate) error {
+	currentUser := update.CurrentUser
+	if currentUser == "" {
+		currentUser = ensureNick()
+	}
+	_, err := apiClient.UpdateBug(ctx, &model.UpdateBugRequest{
+		WorkspaceID: update.WorkspaceID,
+		ID:          update.BugID,
+		VStatus:     update.Status,
+		CurrentUser: currentUser,
+		Resolution:  update.Resolution,
+	})
+	return err
 }

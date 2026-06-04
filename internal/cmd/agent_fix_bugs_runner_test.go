@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -349,5 +351,72 @@ func TestBugFixWorkerDirtyRepoUsesSmallOutputLimit(t *testing.T) {
 	}
 	if len(tapd.comments) != 1 || !strings.Contains(tapd.comments[0], "...[truncated]") {
 		t.Fatalf("comments=%v", tapd.comments)
+	}
+}
+
+func TestSDKBugFixTapdClientMapsBugAndComments(t *testing.T) {
+	resetFlags()
+	var postForms []url.Values
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Method == http.MethodPost {
+			cp := url.Values{}
+			for k, v := range r.PostForm {
+				cp[k] = append([]string(nil), v...)
+			}
+			postForms = append(postForms, cp)
+		}
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/comments") && r.Method == http.MethodPost:
+			w.Write([]byte(`{"status":1,"data":{"Comment":{"id":"c2","author":"agent","description":"ok"}}}`))
+		case strings.Contains(path, "/comments"):
+			w.Write([]byte(`{"status":1,"data":[{"Comment":{"id":"c1","author":"bob","created":"2026-06-04","description":"<p>please check</p>"}}]}`))
+		case strings.Contains(path, "/bugs") && r.Method == http.MethodPost:
+			w.Write([]byte(`{"status":1,"data":{"Bug":{"id":"456","title":"Test Bug","url":"http://test/bug/456"}}}`))
+		default:
+			w.Write([]byte(`{"status":1,"data":[{"Bug":{"id":"456","title":"Test Bug","description":"<p>Desc</p>","status":"new","current_owner":"alice","severity":"normal","priority_label":"high"}}]}`))
+		}
+	}
+	_, cleanup := setupMockServer(t, handler)
+	defer cleanup()
+	apiClient.SetNick("agent")
+
+	c := sdkBugFixTapdClient{}
+	got, err := c.GetBugDetail(context.Background(), "123", "456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "456" || got.Title != "Test Bug" || got.CurrentOwner != "alice" || got.Priority != "high" {
+		t.Fatalf("detail=%+v", got)
+	}
+	if !strings.Contains(got.Description, "Desc") || len(got.Comments) != 1 {
+		t.Fatalf("detail markdown/comments=%+v", got)
+	}
+
+	if err := c.AddBugComment(context.Background(), "123", "456", "fixed by agent"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpdateBugStatus(context.Background(), bugStatusUpdate{
+		WorkspaceID: "123",
+		BugID:       "456",
+		Status:      "resolved",
+		CurrentUser: "agent",
+		Resolution:  "fixed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(postForms) < 2 {
+		t.Fatalf("postForms=%v", postForms)
+	}
+	if postForms[0].Get("description") != "fixed by agent" {
+		t.Fatalf("comment form=%v", postForms[0])
+	}
+	last := postForms[len(postForms)-1]
+	if last.Get("status") != "resolved" && last.Get("v_status") != "resolved" {
+		t.Fatalf("status form=%v", last)
+	}
+	if last.Get("current_user") != "agent" || last.Get("resolution") != "fixed" {
+		t.Fatalf("status form=%v", last)
 	}
 }
