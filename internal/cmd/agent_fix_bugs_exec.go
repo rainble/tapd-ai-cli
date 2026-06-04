@@ -82,8 +82,7 @@ func gitWorkingTreeDirty(ctx context.Context, runner commandRunner, repo string)
 	if res.Err != nil {
 		return false, strings.TrimSpace(res.Stderr), res.Err
 	}
-	out := strings.TrimSpace(res.Stdout)
-	return out != "", out, nil
+	return strings.TrimSpace(res.Stdout) != "", res.Stdout, nil
 }
 
 // bugFixBugDetail 是 agent prompt 所需的缺陷详情快照。

@@ -30,7 +30,7 @@ func TestGitWorkingTreeDirty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !dirty || out == "" {
+	if !dirty || out != " M file.go\n" {
 		t.Fatalf("dirty=%v out=%q", dirty, out)
 	}
 }
