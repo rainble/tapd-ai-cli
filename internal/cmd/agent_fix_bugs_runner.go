@@ -55,39 +55,39 @@ func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) 
 	defer w.mu.Unlock()
 
 	result := bugFixResult{WorkspaceID: target.WorkspaceID, BugID: target.BugID, EventID: target.EventID}
-	limit := w.outputLimit
-	if limit <= 0 {
-		limit = 12288
-	}
+	limit := w.normalizedOutputLimit()
 
 	bug, err := w.tapd.GetBugDetail(ctx, target.WorkspaceID, target.BugID)
 	if err != nil {
-		return w.fail(ctx, result, "bug_show", err.Error())
+		return w.fail(ctx, result, "bug_show", err.Error(), limit)
 	}
 
 	if !w.allowDirty {
 		dirty, out, err := gitWorkingTreeDirty(ctx, w.runner, w.repo)
 		if err != nil {
-			return w.fail(ctx, result, "dirty_check", err.Error())
+			return w.fail(ctx, result, "dirty_check", err.Error(), limit)
 		}
 		if dirty {
-			return w.fail(ctx, result, "dirty_repo", out)
+			return w.fail(ctx, result, "dirty_repo", out, limit)
 		}
 	}
 
 	if w.onStartStatus != "" {
-		_ = w.tapd.UpdateBugStatus(ctx, bugStatusUpdate{
+		err := w.tapd.UpdateBugStatus(ctx, bugStatusUpdate{
 			WorkspaceID: target.WorkspaceID,
 			BugID:       target.BugID,
 			Status:      w.onStartStatus,
 			CurrentUser: w.currentUser,
 		})
+		if err != nil {
+			return w.failNoComment(result, "status_update", statusUpdateFailureDetail(w.onStartStatus, err, "", ""), limit)
+		}
 	}
 
 	prompt := buildAgentPrompt(bug, w.repo, w.testCmd)
 	agent := w.runner.Run(ctx, commandRunConfig{Dir: w.repo, Command: w.agentCmd, Stdin: prompt, Limit: limit})
 	if agent.Err != nil || agent.ExitCode != 0 {
-		return w.fail(ctx, result, "agent", fmt.Sprintf("stdout:\n%s\n\nstderr:\n%s", agent.Stdout, agent.Stderr))
+		return w.fail(ctx, result, "agent", fmt.Sprintf("stdout:\n%s\n\nstderr:\n%s", agent.Stdout, agent.Stderr), limit)
 	}
 
 	test := commandRunResult{}
@@ -95,14 +95,17 @@ func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) 
 	if w.testCmd != "" {
 		test = w.runner.Run(ctx, commandRunConfig{Dir: w.repo, Command: w.testCmd, Limit: limit})
 		if test.Err != nil || test.ExitCode != 0 {
-			return w.fail(ctx, result, "test", fmt.Sprintf("stdout:\n%s\n\nstderr:\n%s", test.Stdout, test.Stderr))
+			return w.fail(ctx, result, "test", fmt.Sprintf("stdout:\n%s\n\nstderr:\n%s", test.Stdout, test.Stderr), limit)
 		}
 		verified = true
 	}
 
 	comment := buildSuccessComment(agent, test, verified)
 	if err := w.tapd.AddBugComment(ctx, target.WorkspaceID, target.BugID, comment); err != nil {
-		return w.failNoComment(result, "comment", err.Error())
+		if statusErr := w.updateFailureStatus(ctx, result); statusErr != nil {
+			return w.failNoComment(result, "status_update", statusUpdateFailureDetail(w.onFailureStatus, statusErr, "comment", err.Error()), limit)
+		}
+		return w.failNoComment(result, "comment", err.Error(), limit)
 	}
 
 	if w.onSuccessStatus != "" {
@@ -117,7 +120,7 @@ func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) 
 			result.Status = "failed"
 			result.Stage = "status_update"
 			result.Verified = verified
-			result.Detail = err.Error()
+			result.Detail = truncateOutput(statusUpdateFailureDetail(w.onSuccessStatus, err, "", ""), limit)
 			return result
 		}
 	}
@@ -127,25 +130,39 @@ func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) 
 	return result
 }
 
-func (w *bugFixWorker) fail(ctx context.Context, base bugFixResult, stage, detail string) bugFixResult {
+func (w *bugFixWorker) fail(ctx context.Context, base bugFixResult, stage, detail string, limit int) bugFixResult {
 	comment := buildFailureComment(stage, detail)
 	_ = w.tapd.AddBugComment(ctx, base.WorkspaceID, base.BugID, comment)
-	if w.onFailureStatus != "" {
-		_ = w.tapd.UpdateBugStatus(ctx, bugStatusUpdate{
-			WorkspaceID: base.WorkspaceID,
-			BugID:       base.BugID,
-			Status:      w.onFailureStatus,
-			CurrentUser: w.currentUser,
-		})
+	if err := w.updateFailureStatus(ctx, base); err != nil {
+		return w.failNoComment(base, "status_update", statusUpdateFailureDetail(w.onFailureStatus, err, stage, detail), limit)
 	}
-	return w.failNoComment(base, stage, detail)
+	return w.failNoComment(base, stage, detail, limit)
 }
 
-func (w *bugFixWorker) failNoComment(base bugFixResult, stage, detail string) bugFixResult {
+func (w *bugFixWorker) updateFailureStatus(ctx context.Context, base bugFixResult) error {
+	if w.onFailureStatus == "" {
+		return nil
+	}
+	return w.tapd.UpdateBugStatus(ctx, bugStatusUpdate{
+		WorkspaceID: base.WorkspaceID,
+		BugID:       base.BugID,
+		Status:      w.onFailureStatus,
+		CurrentUser: w.currentUser,
+	})
+}
+
+func (w *bugFixWorker) failNoComment(base bugFixResult, stage, detail string, limit int) bugFixResult {
 	base.Status = "failed"
 	base.Stage = stage
-	base.Detail = truncateOutput(detail, w.outputLimit)
+	base.Detail = truncateOutput(detail, limit)
 	return base
+}
+
+func (w *bugFixWorker) normalizedOutputLimit() int {
+	if w.outputLimit > 0 {
+		return w.outputLimit
+	}
+	return defaultCommandOutputLimit
 }
 
 func fallbackString(v, fallback string) string {
@@ -153,4 +170,12 @@ func fallbackString(v, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func statusUpdateFailureDetail(status string, err error, originalStage, originalDetail string) string {
+	detail := fmt.Sprintf("status %q update failed: %s", status, err)
+	if originalStage != "" || originalDetail != "" {
+		detail += fmt.Sprintf("\n\nOriginal stage: %s\n\nOriginal detail:\n%s", originalStage, originalDetail)
+	}
+	return detail
 }

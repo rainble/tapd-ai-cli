@@ -160,3 +160,126 @@ func TestBugFixWorkerTestFailure(t *testing.T) {
 		t.Fatalf("success status should not update on test failure: %+v", tapd.updates)
 	}
 }
+
+func TestBugFixWorkerStartStatusFailureStopsBeforeAgent(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}, failUpdateStatus: true}
+	var commands []string
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		commands = append(commands, cfg.Command)
+		if cfg.Command == "git status --porcelain" {
+			return commandRunResult{}
+		}
+		t.Fatalf("agent/test should not run after start status failure: %q", cfg.Command)
+		return commandRunResult{}
+	})
+	worker := bugFixWorker{
+		tapd:          tapd,
+		runner:        runner,
+		repo:          "/repo",
+		agentCmd:      "agent",
+		testCmd:       "go test ./...",
+		onStartStatus: "in_progress",
+		outputLimit:   1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "failed" || res.Stage != "status_update" {
+		t.Fatalf("result=%+v", res)
+	}
+	if !strings.Contains(res.Detail, "in_progress") || !strings.Contains(res.Detail, "boom") {
+		t.Fatalf("detail=%q", res.Detail)
+	}
+	if len(commands) != 1 || commands[0] != "git status --porcelain" {
+		t.Fatalf("commands=%v", commands)
+	}
+}
+
+func TestBugFixWorkerFailureStatusFailurePreservesOriginalContext(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}, failUpdateStatus: true}
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		if cfg.Command == "git status --porcelain" {
+			return commandRunResult{Stdout: " M file.go\n"}
+		}
+		t.Fatalf("agent/test should not run when dirty: %q", cfg.Command)
+		return commandRunResult{}
+	})
+	worker := bugFixWorker{
+		tapd:            tapd,
+		runner:          runner,
+		repo:            "/repo",
+		agentCmd:        "agent",
+		testCmd:         "go test ./...",
+		onFailureStatus: "reopened",
+		outputLimit:     1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "failed" || res.Stage != "status_update" {
+		t.Fatalf("result=%+v", res)
+	}
+	for _, want := range []string{"dirty_repo", " M file.go", "reopened", "boom"} {
+		if !strings.Contains(res.Detail, want) {
+			t.Fatalf("detail=%q missing %q", res.Detail, want)
+		}
+	}
+}
+
+func TestBugFixWorkerSuccessCommentFailureAttemptsFailureStatus(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}, failComment: true}
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		switch cfg.Command {
+		case "git status --porcelain":
+			return commandRunResult{}
+		case "agent":
+			return commandRunResult{Stdout: "changed"}
+		case "go test ./...":
+			return commandRunResult{Stdout: "ok"}
+		default:
+			t.Fatalf("unexpected command %q", cfg.Command)
+			return commandRunResult{}
+		}
+	})
+	worker := bugFixWorker{
+		tapd:            tapd,
+		runner:          runner,
+		repo:            "/repo",
+		agentCmd:        "agent",
+		testCmd:         "go test ./...",
+		onFailureStatus: "reopened",
+		outputLimit:     1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "failed" || res.Stage != "comment" {
+		t.Fatalf("result=%+v", res)
+	}
+	if len(tapd.updates) != 1 || tapd.updates[0].Status != "reopened" {
+		t.Fatalf("updates=%+v", tapd.updates)
+	}
+}
+
+func TestBugFixWorkerDefaultOutputLimitTruncatesFailureDetail(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	longDirty := strings.Repeat("x", defaultCommandOutputLimit+32)
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		if cfg.Command == "git status --porcelain" {
+			return commandRunResult{Stdout: longDirty}
+		}
+		t.Fatalf("agent/test should not run when dirty: %q", cfg.Command)
+		return commandRunResult{}
+	})
+	worker := bugFixWorker{
+		tapd:     tapd,
+		runner:   runner,
+		repo:     "/repo",
+		agentCmd: "agent",
+		testCmd:  "go test ./...",
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "failed" || res.Stage != "dirty_repo" {
+		t.Fatalf("result=%+v", res)
+	}
+	if !strings.Contains(res.Detail, "...[truncated]") {
+		t.Fatalf("detail was not truncated: len=%d", len(res.Detail))
+	}
+	if len(res.Detail) >= len(longDirty) {
+		t.Fatalf("detail len=%d, want less than %d", len(res.Detail), len(longDirty))
+	}
+}
