@@ -11,7 +11,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/gomarkdown/markdown"
+	"github.com/gomarkdown/markdown/html"
+	"github.com/gomarkdown/markdown/parser"
 	"github.com/studyzy/tapd-ai-cli/internal/tapdurl"
 	"github.com/studyzy/tapd-sdk-go/model"
 )
@@ -73,6 +77,35 @@ func optInt(args map[string]interface{}, key string) int {
 		return int(v)
 	}
 	return 0
+}
+
+// markdownToHTML 将 MCP 调用传入的 Markdown 描述转换为 TAPD 需要的 HTML。
+func markdownToHTML(md string) string {
+	if md == "" {
+		return md
+	}
+	extensions := parser.CommonExtensions | parser.AutoHeadingIDs |
+		parser.FencedCode | parser.Tables
+	p := parser.NewWithExtensions(extensions)
+	renderer := html.NewRenderer(html.RendererOptions{Flags: html.CommonFlags})
+	result := strings.TrimSpace(string(markdown.ToHTML([]byte(md), p, renderer)))
+	if containsBlockHTML(result) {
+		return result
+	}
+	return md
+}
+
+// containsBlockHTML 检查 HTML 字符串是否包含块级元素标签。
+func containsBlockHTML(s string) bool {
+	blockTags := []string{"<p>", "<p ", "<h1", "<h2", "<h3", "<h4", "<h5", "<h6",
+		"<ul", "<ol", "<li", "<pre", "<blockquote", "<table", "<div"}
+	lower := strings.ToLower(s)
+	for _, tag := range blockTags {
+		if strings.Contains(lower, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseArgs 把 RawMessage 解成 map[string]interface{}；空 args 返回空 map 而非 nil，
@@ -267,7 +300,7 @@ func toolStoryCreate(s *Server, ws func(string) string) *Tool {
 			req := &model.CreateStoryRequest{
 				WorkspaceID:   workspaceID,
 				Name:          name,
-				Description:   optString(args, "description"),
+				Description:   markdownToHTML(optString(args, "description")),
 				PriorityLabel: optString(args, "priority_label"),
 				Owner:         optString(args, "owner"),
 				Creator:       creator,
@@ -340,7 +373,7 @@ func toolStoryUpdate(s *Server, ws func(string) string) *Tool {
 				Owner:         optString(args, "owner"),
 				PriorityLabel: optString(args, "priority_label"),
 				IterationID:   optString(args, "iteration_id"),
-				Description:   optString(args, "description"),
+				Description:   markdownToHTML(optString(args, "description")),
 			}
 			return s.client.UpdateStory(ctx, req)
 		},
@@ -465,7 +498,7 @@ func toolBugCreate(s *Server, ws func(string) string) *Tool {
 			req := &model.CreateBugRequest{
 				WorkspaceID:   workspaceID,
 				Title:         title,
-				Description:   optString(args, "description"),
+				Description:   markdownToHTML(optString(args, "description")),
 				PriorityLabel: optString(args, "priority_label"),
 				Severity:      optString(args, "severity"),
 				CurrentOwner:  optString(args, "current_owner"),
@@ -525,7 +558,7 @@ func toolBugUpdate(s *Server, ws func(string) string) *Tool {
 				WorkspaceID:   workspaceID,
 				ID:            id,
 				Title:         optString(args, "title"),
-				Description:   optString(args, "description"),
+				Description:   markdownToHTML(optString(args, "description")),
 				Status:        optString(args, "status"),
 				VStatus:       optString(args, "v_status"),
 				PriorityLabel: optString(args, "priority_label"),
@@ -658,7 +691,7 @@ func toolTaskCreate(s *Server, ws func(string) string) *Tool {
 			req := &model.CreateTaskRequest{
 				WorkspaceID:   workspaceID,
 				Name:          name,
-				Description:   optString(args, "description"),
+				Description:   markdownToHTML(optString(args, "description")),
 				Owner:         optString(args, "owner"),
 				Creator:       creator,
 				CC:            optString(args, "cc"),
@@ -728,7 +761,7 @@ func toolTaskUpdate(s *Server, ws func(string) string) *Tool {
 				ID:            id,
 				CurrentUser:   currentUser,
 				Name:          optString(args, "name"),
-				Description:   optString(args, "description"),
+				Description:   markdownToHTML(optString(args, "description")),
 				Status:        optString(args, "status"),
 				Owner:         optString(args, "owner"),
 				CC:            optString(args, "cc"),
@@ -872,7 +905,7 @@ func toolCommentAdd(s *Server, ws func(string) string) *Tool {
 				WorkspaceID: workspaceID,
 				EntryType:   entryType,
 				EntryID:     entryID,
-				Description: description,
+				Description: markdownToHTML(description),
 				Author:      author,
 			})
 		},

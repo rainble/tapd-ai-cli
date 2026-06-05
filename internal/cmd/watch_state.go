@@ -81,7 +81,7 @@ func (s *watchState) Update(id uint64) {
 // 其次 ~/.tapd-ai-cli;两者都失败则返回错误。
 func watchStateDir() (string, error) {
 	if v := strings.TrimSpace(os.Getenv(watchStateDirEnv)); v != "" {
-		if err := os.MkdirAll(v, 0o755); err != nil {
+		if err := os.MkdirAll(v, 0o700); err != nil {
 			return "", err
 		}
 		return v, nil
@@ -91,7 +91,7 @@ func watchStateDir() (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(home, ".tapd-ai-cli")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	return dir, nil
@@ -113,7 +113,7 @@ func readLastID(path string) (uint64, error) {
 // writeLastID 用 tmp + Rename 原子写,避免写一半被读到。
 func writeLastID(path string, id uint64) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(strconv.FormatUint(id, 10)), 0o644); err != nil {
+	if err := os.WriteFile(tmp, []byte(strconv.FormatUint(id, 10)), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

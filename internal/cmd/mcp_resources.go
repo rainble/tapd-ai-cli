@@ -18,7 +18,7 @@ import (
 )
 
 // RegisterEventResources 注册 tapd://events/* 系列 resources 与 tapd://workspaces/active 上下文资源。
-func RegisterEventResources(server *mcp.Server) {
+func RegisterEventResources(server *mcp.Server, defaultWorkspace string) {
 	cache := newEventCache()
 
 	// tapd://workspaces/active - 暴露当前用户关注的 workspace 列表
@@ -32,6 +32,9 @@ func RegisterEventResources(server *mcp.Server) {
 		Handler: func(ctx context.Context, uri string) (interface{}, error) {
 			watchList := splitNonEmpty(os.Getenv("TAPD_WATCH_WORKSPACES"))
 			defaultWS := strings.TrimSpace(os.Getenv("TAPD_WORKSPACE_ID"))
+			if defaultWS == "" {
+				defaultWS = defaultWorkspace
+			}
 			result := map[string]interface{}{
 				"watched_workspace_ids": watchList,
 				"default_workspace_id":  defaultWS,

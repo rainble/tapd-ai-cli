@@ -20,7 +20,7 @@ import (
 const (
 	eventsFile      = "events.jsonl"
 	eventsCapacity  = 100 // 保留最近 N 条
-	eventsFilePerms = 0o644
+	eventsFilePerms = 0o600
 )
 
 // eventCache 维护本地事件缓存文件,支持 append(滚动窗口)和 read(全量读)。

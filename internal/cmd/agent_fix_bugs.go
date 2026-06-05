@@ -33,6 +33,8 @@ var (
 	flagAgentOutputLimit     int
 )
 
+var agentFixBugsBlockedEventID uint64
+
 var agentCmd = &cobra.Command{
 	Use:   "agent",
 	Short: "本地 AI agent 自动化",
@@ -103,6 +105,9 @@ func resolveAgentFixBugsConfig() (agentFixBugsConfig, error) {
 	}
 	if strings.TrimSpace(cfg.repo) == "" {
 		return cfg, fmt.Errorf("--repo is required")
+	}
+	if cfg.onSuccessStatus != "" && strings.TrimSpace(cfg.testCmd) == "" {
+		return cfg, fmt.Errorf("--test-cmd is required when --on-success-status is set")
 	}
 	parsed, err := url.Parse(cfg.endpoint)
 	if cfg.endpoint == "" || err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -243,22 +248,47 @@ func handleAgentFixBugsEvent(ctx context.Context, data string, cfg agentFixBugsC
 	target, ok, reason := extractBugEventTarget(&ev)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "agent fix-bugs: skip event id=%d reason=%s\n", ev.ID, reason)
-		if watchStateRef != nil {
-			watchStateRef.Update(ev.ID)
-		}
+		advanceAgentFixBugsWatermark(ev.ID)
 		return false, nil
 	}
 	if cfg.workspaceID != "" && target.WorkspaceID != cfg.workspaceID {
 		fmt.Fprintf(os.Stderr, "agent fix-bugs: skip event id=%d workspace=%s\n", ev.ID, target.WorkspaceID)
-		if watchStateRef != nil {
-			watchStateRef.Update(ev.ID)
-		}
+		advanceAgentFixBugsWatermark(ev.ID)
 		return false, nil
 	}
 	res := worker.handleTarget(ctx, target)
 	_ = output.PrintJSON(os.Stdout, res, true)
-	if watchStateRef != nil {
-		watchStateRef.Update(ev.ID)
+	if res.Status == "success" {
+		advanceAgentFixBugsWatermark(ev.ID)
+	} else {
+		blockAgentFixBugsWatermark(ev.ID)
 	}
 	return true, nil
+}
+
+func blockAgentFixBugsWatermark(eventID uint64) {
+	if eventID == 0 {
+		return
+	}
+	if agentFixBugsBlockedEventID == 0 || eventID < agentFixBugsBlockedEventID {
+		agentFixBugsBlockedEventID = eventID
+	}
+}
+
+func advanceAgentFixBugsWatermark(eventID uint64) {
+	if watchStateRef == nil || eventID == 0 {
+		return
+	}
+	if agentFixBugsBlockedEventID == 0 {
+		watchStateRef.Update(eventID)
+		return
+	}
+	if eventID < agentFixBugsBlockedEventID {
+		watchStateRef.Update(eventID)
+		return
+	}
+	if eventID == agentFixBugsBlockedEventID {
+		watchStateRef.Update(eventID)
+		agentFixBugsBlockedEventID = 0
+	}
 }

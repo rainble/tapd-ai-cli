@@ -54,7 +54,7 @@ func runMCP(cmd *cobra.Command, args []string) error {
 
 	server := mcp.NewServer(os.Stdin, os.Stdout, os.Stderr, apiClient)
 	mcp.RegisterDefaultTools(server, defaultWorkspace)
-	RegisterEventResources(server)
+	RegisterEventResources(server, defaultWorkspace)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

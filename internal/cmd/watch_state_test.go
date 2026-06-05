@@ -76,9 +76,33 @@ func TestWatchStatePersist(t *testing.T) {
 	if string(raw) != "20" {
 		t.Fatalf("state file content=%q want 20", raw)
 	}
+	if info, err := os.Stat(filepath.Join(dir, watchStateFile)); err != nil {
+		t.Fatalf("stat state file err: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("state file mode=%#o want 0600", got)
+	}
 
 	s2 := newWatchState()
 	if got := s2.LastSeen(); got != 20 {
 		t.Fatalf("reloaded LastSeen=%d want 20", got)
+	}
+}
+
+func TestWatchStateDirAndEventCacheUsePrivatePermissions(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	t.Setenv(watchStateDirEnv, dir)
+
+	cache := newEventCache()
+	cache.Append(&streamEvent{ID: 1, ReceivedAt: 1})
+
+	if info, err := os.Stat(dir); err != nil {
+		t.Fatalf("stat state dir err: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("state dir mode=%#o want 0700", got)
+	}
+	if info, err := os.Stat(filepath.Join(dir, eventsFile)); err != nil {
+		t.Fatalf("stat events file err: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("events file mode=%#o want 0600", got)
 	}
 }

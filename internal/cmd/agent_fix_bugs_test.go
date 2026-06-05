@@ -63,6 +63,23 @@ func TestResolveAgentFixBugsConfigMissingRepo(t *testing.T) {
 	}
 }
 
+func TestResolveAgentFixBugsConfigSuccessStatusRequiresTestCommand(t *testing.T) {
+	t.Cleanup(resetAgentFixBugsTestState)
+	resetAgentFixBugsTestState()
+
+	flagAgentRepo = "/repo"
+	flagWatchEndpoint = "https://flag/events"
+	flagAgentOnSuccessStatus = "resolved"
+
+	_, err := resolveAgentFixBugsConfig()
+	if err == nil {
+		t.Fatal("expected error when success status is configured without test command")
+	}
+	if !strings.Contains(err.Error(), "--test-cmd") {
+		t.Fatalf("error should mention --test-cmd, got %v", err)
+	}
+}
+
 func TestReadAgentFixBugsSSEOnce(t *testing.T) {
 	t.Cleanup(resetAgentFixBugsTestState)
 	resetAgentFixBugsTestState()
@@ -90,6 +107,79 @@ func TestReadAgentFixBugsSSEOnce(t *testing.T) {
 	}
 }
 
+func TestHandleAgentFixBugsEventDoesNotAdvanceStateOnFailure(t *testing.T) {
+	t.Cleanup(resetAgentFixBugsTestState)
+	resetAgentFixBugsTestState()
+	watchStateRef = &watchState{}
+
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		if cfg.Command == "git status --porcelain" {
+			return commandRunResult{Stdout: " M file.go\n"}
+		}
+		t.Fatalf("agent/test should not run when repo is dirty: %q", cfg.Command)
+		return commandRunResult{}
+	})
+	worker := &bugFixWorker{tapd: tapd, runner: runner, repo: "/repo", agentCmd: "agent", outputLimit: 1024}
+	data := `{"id":7,"received_at":1,"event":{"event":"bug::create","workspace_id":"123","bug":{"id":"456"}}}`
+
+	handled, err := handleAgentFixBugsEvent(context.Background(), data, agentFixBugsConfig{}, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handled {
+		t.Fatal("expected event to be handled")
+	}
+	if watchStateRef.LastSeen() != 0 {
+		t.Fatalf("lastSeen=%d, want 0 after failed handling", watchStateRef.LastSeen())
+	}
+}
+
+func TestHandleAgentFixBugsEventFailureBlocksLaterSuccessWatermark(t *testing.T) {
+	t.Cleanup(resetAgentFixBugsTestState)
+	resetAgentFixBugsTestState()
+	watchStateRef = &watchState{}
+
+	dirty := true
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		switch cfg.Command {
+		case "git status --porcelain":
+			if dirty {
+				return commandRunResult{Stdout: " M file.go\n"}
+			}
+			return commandRunResult{}
+		case "agent":
+			return commandRunResult{Stdout: "ok"}
+		default:
+			t.Fatalf("unexpected command %q", cfg.Command)
+			return commandRunResult{}
+		}
+	})
+	worker := &bugFixWorker{tapd: tapd, runner: runner, repo: "/repo", agentCmd: "agent", outputLimit: 1024}
+
+	failedEvent := `{"id":7,"received_at":1,"event":{"event":"bug::create","workspace_id":"123","bug":{"id":"456"}}}`
+	laterEvent := `{"id":8,"received_at":1,"event":{"event":"bug::create","workspace_id":"123","bug":{"id":"789"}}}`
+	retryEvent := `{"id":7,"received_at":1,"event":{"event":"bug::create","workspace_id":"123","bug":{"id":"456"}}}`
+
+	if _, err := handleAgentFixBugsEvent(context.Background(), failedEvent, agentFixBugsConfig{}, worker); err != nil {
+		t.Fatal(err)
+	}
+	dirty = false
+	if _, err := handleAgentFixBugsEvent(context.Background(), laterEvent, agentFixBugsConfig{}, worker); err != nil {
+		t.Fatal(err)
+	}
+	if watchStateRef.LastSeen() != 0 {
+		t.Fatalf("later success advanced blocked watermark to %d", watchStateRef.LastSeen())
+	}
+	if _, err := handleAgentFixBugsEvent(context.Background(), retryEvent, agentFixBugsConfig{}, worker); err != nil {
+		t.Fatal(err)
+	}
+	if watchStateRef.LastSeen() != 7 {
+		t.Fatalf("retry success lastSeen=%d want 7", watchStateRef.LastSeen())
+	}
+}
+
 func resetAgentFixBugsTestState() {
 	flagAgentRepo = ""
 	flagAgentCmd = ""
@@ -107,4 +197,5 @@ func resetAgentFixBugsTestState() {
 	flagWorkspaceID = ""
 	appConfig = nil
 	watchStateRef = nil
+	agentFixBugsBlockedEventID = 0
 }
