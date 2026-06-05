@@ -30,12 +30,16 @@ func RegisterDefaultTools(s *Server, defaultWorkspaceID string) {
 	s.Register(toolURLResolve(s, ws))
 	s.Register(toolStoryList(s, ws))
 	s.Register(toolStoryShow(s, ws))
+	s.Register(toolStoryCreate(s, ws))
 	s.Register(toolStoryUpdate(s, ws))
 	s.Register(toolBugList(s, ws))
 	s.Register(toolBugShow(s, ws))
 	s.Register(toolBugCreate(s, ws))
+	s.Register(toolBugUpdate(s, ws))
 	s.Register(toolTaskList(s, ws))
 	s.Register(toolTaskShow(s, ws))
+	s.Register(toolTaskCreate(s, ws))
+	s.Register(toolTaskUpdate(s, ws))
 	s.Register(toolIterationList(s, ws))
 	s.Register(toolCommentList(s, ws))
 	s.Register(toolCommentAdd(s, ws))
@@ -212,6 +216,73 @@ func toolStoryShow(s *Server, ws func(string) string) *Tool {
 				return nil, fmt.Errorf("workspace_id required (no default configured)")
 			}
 			return s.client.GetStory(ctx, workspaceID, id)
+		},
+	}
+}
+
+func toolStoryCreate(s *Server, ws func(string) string) *Tool {
+	return &Tool{
+		Name:        "tapd_story_create",
+		Description: "Create a new story (需求). Title (name) is required; other fields optional. parent_id 用于创建子需求。",
+		InputSchema: schema(`{
+			"type":"object",
+			"properties":{
+				"workspace_id":{"type":"string"},
+				"name":{"type":"string","description":"标题(必填)"},
+				"description":{"type":"string"},
+				"priority_label":{"type":"string","description":"优先级,如 High/Middle/Low"},
+				"owner":{"type":"string","description":"处理人"},
+				"developer":{"type":"string","description":"开发人员"},
+				"cc":{"type":"string"},
+				"iteration_id":{"type":"string"},
+				"parent_id":{"type":"string","description":"父需求 ID,用于创建子需求"},
+				"category_id":{"type":"string"},
+				"type":{"type":"string"},
+				"source":{"type":"string"},
+				"begin":{"type":"string","description":"预计开始日期 YYYY-MM-DD"},
+				"due":{"type":"string","description":"预计结束日期 YYYY-MM-DD"},
+				"label":{"type":"string","description":"标签,多个用 | 分隔"}
+			},
+			"required":["name"],
+			"additionalProperties":false
+		}`),
+		Handler: func(ctx context.Context, raw json.RawMessage) (interface{}, error) {
+			args, err := parseArgs(raw)
+			if err != nil {
+				return nil, err
+			}
+			name, err := requireString(args, "name")
+			if err != nil {
+				return nil, err
+			}
+			workspaceID := ws(optString(args, "workspace_id"))
+			if workspaceID == "" {
+				return nil, fmt.Errorf("workspace_id required (no default configured)")
+			}
+			creator := s.client.GetNick()
+			if creator == "" {
+				_ = s.client.FetchNick(ctx)
+				creator = s.client.GetNick()
+			}
+			req := &model.CreateStoryRequest{
+				WorkspaceID:   workspaceID,
+				Name:          name,
+				Description:   optString(args, "description"),
+				PriorityLabel: optString(args, "priority_label"),
+				Owner:         optString(args, "owner"),
+				Creator:       creator,
+				Developer:     optString(args, "developer"),
+				CC:            optString(args, "cc"),
+				IterationID:   optString(args, "iteration_id"),
+				ParentID:      optString(args, "parent_id"),
+				CategoryID:    optString(args, "category_id"),
+				Type:          optString(args, "type"),
+				Source:        optString(args, "source"),
+				Begin:         optString(args, "begin"),
+				Due:           optString(args, "due"),
+				Label:         optString(args, "label"),
+			}
+			return s.client.CreateStory(ctx, req)
 		},
 	}
 }
@@ -406,6 +477,70 @@ func toolBugCreate(s *Server, ws func(string) string) *Tool {
 	}
 }
 
+func toolBugUpdate(s *Server, ws func(string) string) *Tool {
+	return &Tool{
+		Name: "tapd_bug_update",
+		Description: "Update fields of an existing bug (status / owner / priority / severity etc.). " +
+			"Only provided fields are touched.",
+		InputSchema: schema(`{
+			"type":"object",
+			"properties":{
+				"id":{"type":"string"},
+				"workspace_id":{"type":"string"},
+				"current_user":{"type":"string","description":"required by TAPD as the change actor; defaults to authenticated user"},
+				"title":{"type":"string"},
+				"description":{"type":"string"},
+				"status":{"type":"string"},
+				"v_status":{"type":"string"},
+				"priority_label":{"type":"string"},
+				"severity":{"type":"string"},
+				"current_owner":{"type":"string"},
+				"iteration_id":{"type":"string"},
+				"resolution":{"type":"string"}
+			},
+			"required":["id"],
+			"additionalProperties":false
+		}`),
+		Handler: func(ctx context.Context, raw json.RawMessage) (interface{}, error) {
+			args, err := parseArgs(raw)
+			if err != nil {
+				return nil, err
+			}
+			id, err := requireString(args, "id")
+			if err != nil {
+				return nil, err
+			}
+			workspaceID := ws(optString(args, "workspace_id"))
+			if workspaceID == "" {
+				return nil, fmt.Errorf("workspace_id required (no default configured)")
+			}
+			currentUser := optString(args, "current_user")
+			if currentUser == "" {
+				currentUser = s.client.GetNick()
+				if currentUser == "" {
+					_ = s.client.FetchNick(ctx)
+					currentUser = s.client.GetNick()
+				}
+			}
+			req := &model.UpdateBugRequest{
+				WorkspaceID:   workspaceID,
+				ID:            id,
+				Title:         optString(args, "title"),
+				Description:   optString(args, "description"),
+				Status:        optString(args, "status"),
+				VStatus:       optString(args, "v_status"),
+				PriorityLabel: optString(args, "priority_label"),
+				Severity:      optString(args, "severity"),
+				CurrentOwner:  optString(args, "current_owner"),
+				CurrentUser:   currentUser,
+				IterationID:   optString(args, "iteration_id"),
+				Resolution:    optString(args, "resolution"),
+			}
+			return s.client.UpdateBug(ctx, req)
+		},
+	}
+}
+
 // ─────────────────────────── task ────────────────────────────────
 
 func toolTaskList(s *Server, ws func(string) string) *Tool {
@@ -477,6 +612,137 @@ func toolTaskShow(s *Server, ws func(string) string) *Tool {
 				return nil, fmt.Errorf("workspace_id required (no default configured)")
 			}
 			return s.client.GetTask(ctx, workspaceID, id)
+		},
+	}
+}
+
+func toolTaskCreate(s *Server, ws func(string) string) *Tool {
+	return &Tool{
+		Name:        "tapd_task_create",
+		Description: "Create a new task (任务). Name is required; story_id 用于挂到某个需求下面。",
+		InputSchema: schema(`{
+			"type":"object",
+			"properties":{
+				"workspace_id":{"type":"string"},
+				"name":{"type":"string","description":"任务标题(必填)"},
+				"description":{"type":"string"},
+				"owner":{"type":"string","description":"处理人,多个用 ; 分隔"},
+				"cc":{"type":"string"},
+				"story_id":{"type":"string","description":"关联需求 ID"},
+				"iteration_id":{"type":"string"},
+				"priority_label":{"type":"string"},
+				"begin":{"type":"string","description":"预计开始日期 YYYY-MM-DD"},
+				"due":{"type":"string","description":"预计结束日期 YYYY-MM-DD"},
+				"effort":{"type":"string","description":"预估工时(小时)"},
+				"label":{"type":"string"}
+			},
+			"required":["name"],
+			"additionalProperties":false
+		}`),
+		Handler: func(ctx context.Context, raw json.RawMessage) (interface{}, error) {
+			args, err := parseArgs(raw)
+			if err != nil {
+				return nil, err
+			}
+			name, err := requireString(args, "name")
+			if err != nil {
+				return nil, err
+			}
+			workspaceID := ws(optString(args, "workspace_id"))
+			if workspaceID == "" {
+				return nil, fmt.Errorf("workspace_id required (no default configured)")
+			}
+			creator := s.client.GetNick()
+			if creator == "" {
+				_ = s.client.FetchNick(ctx)
+				creator = s.client.GetNick()
+			}
+			req := &model.CreateTaskRequest{
+				WorkspaceID:   workspaceID,
+				Name:          name,
+				Description:   optString(args, "description"),
+				Owner:         optString(args, "owner"),
+				Creator:       creator,
+				CC:            optString(args, "cc"),
+				StoryID:       optString(args, "story_id"),
+				IterationID:   optString(args, "iteration_id"),
+				PriorityLabel: optString(args, "priority_label"),
+				Begin:         optString(args, "begin"),
+				Due:           optString(args, "due"),
+				Effort:        optString(args, "effort"),
+				Label:         optString(args, "label"),
+			}
+			return s.client.CreateTask(ctx, req)
+		},
+	}
+}
+
+func toolTaskUpdate(s *Server, ws func(string) string) *Tool {
+	return &Tool{
+		Name: "tapd_task_update",
+		Description: "Update fields of an existing task (status / owner / due / effort etc.). " +
+			"Only provided fields are touched. Status: open / progressing / done.",
+		InputSchema: schema(`{
+			"type":"object",
+			"properties":{
+				"id":{"type":"string"},
+				"workspace_id":{"type":"string"},
+				"current_user":{"type":"string","description":"required by TAPD as the change actor; defaults to authenticated user"},
+				"name":{"type":"string"},
+				"description":{"type":"string"},
+				"status":{"type":"string","description":"open / progressing / done"},
+				"owner":{"type":"string"},
+				"cc":{"type":"string"},
+				"story_id":{"type":"string"},
+				"iteration_id":{"type":"string"},
+				"priority_label":{"type":"string"},
+				"begin":{"type":"string"},
+				"due":{"type":"string"},
+				"effort":{"type":"string"},
+				"label":{"type":"string"}
+			},
+			"required":["id"],
+			"additionalProperties":false
+		}`),
+		Handler: func(ctx context.Context, raw json.RawMessage) (interface{}, error) {
+			args, err := parseArgs(raw)
+			if err != nil {
+				return nil, err
+			}
+			id, err := requireString(args, "id")
+			if err != nil {
+				return nil, err
+			}
+			workspaceID := ws(optString(args, "workspace_id"))
+			if workspaceID == "" {
+				return nil, fmt.Errorf("workspace_id required (no default configured)")
+			}
+			currentUser := optString(args, "current_user")
+			if currentUser == "" {
+				currentUser = s.client.GetNick()
+				if currentUser == "" {
+					_ = s.client.FetchNick(ctx)
+					currentUser = s.client.GetNick()
+				}
+			}
+			req := &model.UpdateTaskRequest{
+				WorkspaceID:   workspaceID,
+				ID:            id,
+				CurrentUser:   currentUser,
+				Name:          optString(args, "name"),
+				Description:   optString(args, "description"),
+				Status:        optString(args, "status"),
+				Owner:         optString(args, "owner"),
+				CC:            optString(args, "cc"),
+				StoryID:       optString(args, "story_id"),
+				IterationID:   optString(args, "iteration_id"),
+				PriorityLabel: optString(args, "priority_label"),
+				Begin:         optString(args, "begin"),
+				Due:           optString(args, "due"),
+				Effort:        optString(args, "effort"),
+				Label:         optString(args, "label"),
+			}
+			return s.client.UpdateTask(ctx, req)
 		},
 	}
 }

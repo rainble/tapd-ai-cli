@@ -63,6 +63,10 @@ const (
 // 返回的 interface{} 会被序列化成 MCP content 数组中的一条 text item。
 type ToolHandler func(ctx context.Context, args json.RawMessage) (interface{}, error)
 
+// ResourceHandler 实现一个 MCP resource 的读取逻辑，uri 是 resources/read 请求的资源标识。
+// 返回的 interface{} 会被序列化成 MCP contents 数组。
+type ResourceHandler func(ctx context.Context, uri string) (interface{}, error)
+
 // Tool 描述一个 MCP 工具的元信息和执行体。
 type Tool struct {
 	Name        string          `json:"name"`
@@ -71,13 +75,23 @@ type Tool struct {
 	Handler     ToolHandler     `json:"-"`
 }
 
+// Resource 描述一个 MCP 资源的元信息和读取体。
+type Resource struct {
+	URI         string          `json:"uri"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	MimeType    string          `json:"mimeType,omitempty"`
+	Handler     ResourceHandler `json:"-"`
+}
+
 // Server 持有 stdio 流、tapd 客户端和已注册工具表。
 type Server struct {
-	in     *bufio.Reader
-	out    *json.Encoder
-	logger io.Writer // stderr，用于结构化日志，不能写到 stdout（会污染 JSON-RPC）
-	client *tapd.Client
-	tools  map[string]*Tool
+	in        *bufio.Reader
+	out       *json.Encoder
+	logger    io.Writer // stderr，用于结构化日志，不能写到 stdout（会污染 JSON-RPC）
+	client    *tapd.Client
+	tools     map[string]*Tool
+	resources map[string]*Resource
 
 	mu     sync.Mutex // 保护 out 写入；handler 内可能并发触发响应
 	closed bool
@@ -86,11 +100,12 @@ type Server struct {
 // NewServer 构造 server。stdin/stdout 是 MCP 协议必须的，stderr 用于诊断。
 func NewServer(in io.Reader, out io.Writer, logger io.Writer, client *tapd.Client) *Server {
 	return &Server{
-		in:     bufio.NewReaderSize(in, 64*1024),
-		out:    json.NewEncoder(out),
-		logger: logger,
-		client: client,
-		tools:  make(map[string]*Tool),
+		in:        bufio.NewReaderSize(in, 64*1024),
+		out:       json.NewEncoder(out),
+		logger:    logger,
+		client:    client,
+		tools:     make(map[string]*Tool),
+		resources: make(map[string]*Resource),
 	}
 }
 
@@ -100,6 +115,11 @@ func (s *Server) Client() *tapd.Client { return s.client }
 // Register 注册一个工具；重名直接覆盖（方便测试桩）。
 func (s *Server) Register(t *Tool) {
 	s.tools[t.Name] = t
+}
+
+// RegisterResource 注册一个 resource；重名直接覆盖。
+func (s *Server) RegisterResource(r *Resource) {
+	s.resources[r.URI] = r
 }
 
 // Run 主循环：读一行 → 解析 → 路由方法 → 写一行响应。
@@ -147,6 +167,10 @@ func (s *Server) dispatch(ctx context.Context, raw []byte) {
 		s.handleToolsList(req)
 	case "tools/call":
 		s.handleToolsCall(ctx, req)
+	case "resources/list":
+		s.handleResourcesList(req)
+	case "resources/read":
+		s.handleResourcesRead(ctx, req)
 	case "ping":
 		s.writeResult(req.ID, map[string]interface{}{})
 	default:
@@ -167,8 +191,8 @@ func (s *Server) handleInitialize(req rpcRequest) {
 			"version": "0.1.0",
 		},
 		"capabilities": map[string]interface{}{
-			// 当前只声明 tools 能力，未来加 resources/prompts 时在这里扩展
-			"tools": map[string]interface{}{},
+			"tools":     map[string]interface{}{},
+			"resources": map[string]interface{}{},
 		},
 	})
 }
@@ -281,4 +305,57 @@ func (s *Server) write(resp rpcResponse) {
 	if err := s.out.Encode(resp); err != nil {
 		fmt.Fprintf(s.logger, "mcp: write response err: %v\n", err)
 	}
+}
+
+// handleResourcesList 返回所有注册的 resources。
+func (s *Server) handleResourcesList(req rpcRequest) {
+	list := make([]*Resource, 0, len(s.resources))
+	for _, r := range s.resources {
+		list = append(list, r)
+	}
+	// 按 URI 字典序排序,便于客户端展示稳定
+	for i := 0; i < len(list); i++ {
+		for j := i + 1; j < len(list); j++ {
+			if list[i].URI > list[j].URI {
+				list[i], list[j] = list[j], list[i]
+			}
+		}
+	}
+	s.writeResult(req.ID, map[string]interface{}{"resources": list})
+}
+
+// handleResourcesRead 读取一个具体 resource 的内容。
+func (s *Server) handleResourcesRead(ctx context.Context, req rpcRequest) {
+	var p struct {
+		URI string `json:"uri"`
+	}
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		s.writeError(req.ID, errInvalidParams, "invalid params: "+err.Error())
+		return
+	}
+	res, ok := s.resources[p.URI]
+	if !ok {
+		s.writeError(req.ID, errMethodNotFound, "resource not found: "+p.URI)
+		return
+	}
+	content, err := res.Handler(ctx, p.URI)
+	if err != nil {
+		// resource 读取失败按 MCP 约定回 isError content,让模型能看到错误
+		s.writeIsErrorText(req.ID, err.Error())
+		return
+	}
+	text, err := stringifyResult(content)
+	if err != nil {
+		s.writeError(req.ID, errInternal, "marshal resource content: "+err.Error())
+		return
+	}
+	s.writeResult(req.ID, map[string]interface{}{
+		"contents": []interface{}{
+			map[string]interface{}{
+				"uri":      p.URI,
+				"mimeType": res.MimeType,
+				"text":     text,
+			},
+		},
+	})
 }

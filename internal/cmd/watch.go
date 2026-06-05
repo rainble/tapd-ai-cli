@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -33,9 +34,17 @@ var (
 	flagWatchPretty   bool
 	flagWatchOnce     bool
 	flagWatchFilters  []string
+	flagWatchNoState  bool
 
 	// watchFilters 是已解析的过滤规则；resolveWatchConfig 之后填充。
 	watchFilters []filterRule
+
+	// watchStateRef 是当前 stream 用到的水位状态;emit 成功后回写。
+	// 由 runWatch 在解析配置后赋值,stream/streamOnce/emit 共享。
+	watchStateRef *watchState
+
+	// watchEventsRef 是当前 stream 的事件缓存;emit 成功后追加到本地 jsonl 文件。
+	watchEventsRef *eventCache
 )
 
 // watchCmd 订阅服务端 SSE 事件流，把事件转成一行一条紧凑 JSON 写到 stdout。
@@ -71,6 +80,8 @@ func init() {
 	watchCmd.Flags().StringSliceVar(&flagWatchFilters, "filter", nil,
 		"过滤事件：<path>=<glob>[,<glob>...]，可多次指定（多 filter 间 AND，单 filter 内 OR）。\n"+
 			"示例：--filter event.event=story_*,bug_create --filter event.workspace_id=20063271")
+	watchCmd.Flags().BoolVar(&flagWatchNoState, "no-state", false,
+		"禁用 last_event_id 水位持久化,每次启动都从服务端拉全量历史(测试/调试用)")
 
 	rootCmd.AddCommand(watchCmd)
 }
@@ -100,7 +111,24 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		os.Exit(output.ExitParamError)
 		return nil
 	}
+	// 通过 TAPD_WATCH_WORKSPACES 环境变量做粗粒度过滤,语法 "id1,id2,id3"。
+	// 比 --filter event.workspace_id=... 更直观,适合长期固定关注几个空间的场景。
+	if wsList := strings.TrimSpace(os.Getenv("TAPD_WATCH_WORKSPACES")); wsList != "" {
+		rules = append(rules, filterRule{
+			raw:   "TAPD_WATCH_WORKSPACES=" + wsList,
+			path:  []string{"event", "workspace_id"},
+			globs: splitGlobs(wsList),
+		})
+	}
 	watchFilters = rules
+
+	if flagWatchNoState {
+		watchStateRef = &watchState{}
+		watchEventsRef = &eventCache{} // 内存模式
+	} else {
+		watchStateRef = newWatchState()
+		watchEventsRef = newEventCache()
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -177,7 +205,15 @@ var errOnceDone = fmt.Errorf("watch: once event received")
 
 // streamOnce 建立一次 SSE 连接，读取并处理事件直到连接断开或 ctx 取消。
 func streamOnce(ctx context.Context, endpoint, token string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if watchStateRef == nil {
+		// 未走 runWatch 入口（直接被测试或外部调用)时,降级为内存模式,避免空指针
+		watchStateRef = &watchState{}
+	}
+	target, err := injectLastID(endpoint, watchStateRef.LastSeen())
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return err
 	}
@@ -185,6 +221,10 @@ func streamOnce(ctx context.Context, endpoint, token string) error {
 	req.Header.Set("Cache-Control", "no-cache")
 	if token != "" {
 		req.Header.Set("X-TAPD-Token", token)
+	}
+	if v := watchStateRef.LastSeen(); v > 0 {
+		// 顺手带上 SSE 标准 header,服务端任一识别即可
+		req.Header.Set("Last-Event-ID", strconv.FormatUint(v, 10))
 	}
 
 	// 长连接不能给 Client 设 Timeout，否则连接会被周期性 kill；
@@ -273,6 +313,16 @@ func emit(data string) error {
 
 	fmt.Fprintln(os.Stdout, string(serialized))
 
+	// 持久化水位供重启去重
+	if watchStateRef != nil {
+		watchStateRef.Update(ev.ID)
+	}
+
+	// 追加到事件缓存供 MCP server 读取
+	if watchEventsRef != nil {
+		watchEventsRef.Append(&ev)
+	}
+
 	if flagWatchExec != "" {
 		runExec(flagWatchExec, serialized)
 	}
@@ -289,4 +339,20 @@ func runExec(command string, payload []byte) {
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "watch: exec failed: %v\n", err)
 	}
+}
+
+// injectLastID 把当前水位作为 last_id query 拼到 endpoint 上;水位为 0 时返回原 URL。
+// 已有 last_id 时覆盖,避免用户在 endpoint 里写死的旧值压住实际进度。
+func injectLastID(endpoint string, lastID uint64) (string, error) {
+	if lastID == 0 {
+		return endpoint, nil
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("last_id", strconv.FormatUint(lastID, 10))
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
