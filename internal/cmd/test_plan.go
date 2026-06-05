@@ -186,7 +186,7 @@ func runTestPlanProgress(cmd *cobra.Command, args []string) error {
 		os.Exit(output.ExitParamError)
 		return nil
 	}
-	req := &model.TestPlanIDRequest{
+	req := &model.GetTestPlanProgressRequest{
 		WorkspaceID: flagWorkspaceID,
 		ID:          flagTestPlanID,
 	}

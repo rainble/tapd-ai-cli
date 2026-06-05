@@ -156,25 +156,23 @@ func runTCaseBatchCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// 验证 JSON 格式
-	var tcases []map[string]interface{}
-	if err := json.Unmarshal([]byte(flagTCasesJSON), &tcases); err != nil {
+	var items []model.BatchCreateTCaseItem
+	if err := json.Unmarshal([]byte(flagTCasesJSON), &items); err != nil {
 		output.PrintError(os.Stderr, "invalid_parameter",
 			fmt.Sprintf("invalid JSON for --tcases: %v", err), "")
 		os.Exit(output.ExitParamError)
 		return nil
 	}
 
-	// 为每个用例添加 workspace_id
-	for i := range tcases {
-		if _, ok := tcases[i]["workspace_id"]; !ok {
-			tcases[i]["workspace_id"] = flagWorkspaceID
+	// 为每个用例补全 workspace_id
+	for i := range items {
+		if items[i].WorkspaceID == "" {
+			items[i].WorkspaceID = flagWorkspaceID
 		}
 	}
 
-	tcasesBytes, _ := json.Marshal(tcases)
 	req := &model.BatchCreateTCasesRequest{
-		WorkspaceID: flagWorkspaceID,
-		Data:        string(tcasesBytes),
+		Items: items,
 	}
 
 	data, err := apiClient.BatchCreateTCases(context.Background(), req)

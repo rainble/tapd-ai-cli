@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/studyzy/tapd-ai-cli/internal/config"
+	"github.com/studyzy/tapd-ai-cli/internal/tapdurl"
 	tapd "github.com/studyzy/tapd-sdk-go"
 	"github.com/studyzy/tapd-sdk-go/model"
 )
@@ -66,19 +67,14 @@ func TestIntegration_WorkspaceList(t *testing.T) {
 	skipIfNoCredentials(t)
 	c := setupIntegrationClient(t)
 
-	workspaces, err := c.ListWorkspaces(context.Background(), "")
+	workspaces, err := c.ListWorkspaces(context.Background(), "", c.GetNick())
 	if err != nil {
 		t.Fatalf("ListWorkspaces failed: %v", err)
 	}
 	if len(workspaces) == 0 {
 		t.Fatal("Expected at least one workspace")
 	}
-	// 验证没有 organization 类型
-	for _, ws := range workspaces {
-		if ws.Category == "organization" {
-			t.Errorf("ListWorkspaces should filter organization entries, got: %+v", ws)
-		}
-	}
+	t.Logf("Found workspaces: %+v", workspaces)
 	t.Logf("Found %d workspaces", len(workspaces))
 }
 
@@ -480,9 +476,9 @@ func TestIntegration_URLCommand_StoryURL(t *testing.T) {
 	storyURL := "https://www.tapd.cn/tapd_fe/" + wsID + "/story/detail/" + storyID
 
 	// 验证 URL 解析
-	parsed, err := parseTAPDURL(storyURL)
+	parsed, err := tapdurl.Parse(storyURL)
 	if err != nil {
-		t.Fatalf("parseTAPDURL(%q) failed: %v", storyURL, err)
+		t.Fatalf("tapdurl.Parse(%q) failed: %v", storyURL, err)
 	}
 	if parsed.EntityType != "story" {
 		t.Errorf("EntityType = %q, want %q", parsed.EntityType, "story")
@@ -702,9 +698,9 @@ func TestIntegration_URLCommand_WikiURL(t *testing.T) {
 	wikiURL := "https://www.tapd.cn/" + wsID + "/markdown_wikis/show/#" + wikiID
 
 	// 验证 URL 解析
-	parsed, err := parseTAPDURL(wikiURL)
+	parsed, err := tapdurl.Parse(wikiURL)
 	if err != nil {
-		t.Fatalf("parseTAPDURL(%q) failed: %v", wikiURL, err)
+		t.Fatalf("tapdurl.Parse(%q) failed: %v", wikiURL, err)
 	}
 	if parsed.EntityType != "wiki" {
 		t.Errorf("EntityType = %q, want %q", parsed.EntityType, "wiki")
@@ -950,8 +946,8 @@ func TestIntegration_CategoryList_Client(t *testing.T) {
 	c := setupIntegrationClient(t)
 	wsID := os.Getenv("TAPD_WORKSPACE_ID")
 
-	categories, err := c.ListCategories(context.Background(), map[string]string{
-		"workspace_id": wsID,
+	categories, err := c.ListCategories(context.Background(), &model.ListStoryCategoriesRequest{
+		WorkspaceID: wsID,
 	})
 	if err != nil {
 		t.Fatalf("ListCategories failed: %v", err)

@@ -10,12 +10,14 @@ import (
 
 // Config 表示本地持久化的配置数据，存储于 .tapd.json
 type Config struct {
-	AccessToken string `json:"access_token,omitempty"`
-	APIUser     string `json:"api_user,omitempty"`
-	APIPassword string `json:"api_password,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	APIBaseURL  string `json:"api_base_url,omitempty"`
-	BaseURL     string `json:"base_url,omitempty"`
+	AccessToken    string `json:"access_token,omitempty"`
+	APIUser        string `json:"api_user,omitempty"`
+	APIPassword    string `json:"api_password,omitempty"`
+	WorkspaceID    string `json:"workspace_id,omitempty"`
+	APIBaseURL     string `json:"api_base_url,omitempty"`
+	BaseURL        string `json:"base_url,omitempty"`
+	WatchEndpoint  string `json:"watch_endpoint,omitempty"`  // SSE 订阅地址，例如 https://upower.example.co/x/upower/tapd/events
+	SubscribeToken string `json:"subscribe_token,omitempty"` // 订阅鉴权 token，对应服务端 SSE.SubscribeToken
 }
 
 // LoadConfig 按优先级加载配置：环境变量 > ./.tapd.json > ~/.tapd.json
@@ -53,6 +55,12 @@ func LoadConfig() (*Config, error) {
 		if localCfg.BaseURL != "" {
 			cfg.BaseURL = localCfg.BaseURL
 		}
+		if localCfg.WatchEndpoint != "" {
+			cfg.WatchEndpoint = localCfg.WatchEndpoint
+		}
+		if localCfg.SubscribeToken != "" {
+			cfg.SubscribeToken = localCfg.SubscribeToken
+		}
 	}
 
 	// 环境变量优先级最高
@@ -62,6 +70,8 @@ func LoadConfig() (*Config, error) {
 	envWorkspace := os.Getenv("TAPD_WORKSPACE_ID")
 	envAPIURL := os.Getenv("TAPD_API_BASE_URL")
 	envURL := os.Getenv("TAPD_BASE_URL")
+	envWatch := os.Getenv("TAPD_WATCH_ENDPOINT")
+	envSubToken := os.Getenv("TAPD_SUBSCRIBE_TOKEN")
 
 	if envToken != "" || envUser != "" {
 		cfg.AccessToken = envToken
@@ -76,6 +86,12 @@ func LoadConfig() (*Config, error) {
 	}
 	if envURL != "" {
 		cfg.BaseURL = envURL
+	}
+	if envWatch != "" {
+		cfg.WatchEndpoint = envWatch
+	}
+	if envSubToken != "" {
+		cfg.SubscribeToken = envSubToken
 	}
 
 	return cfg, nil

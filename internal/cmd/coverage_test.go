@@ -45,6 +45,66 @@ func resetFlags() {
 	flagJSON = false
 	flagPretty = false
 	flagNoComments = true // 默认不输出评论避免额外请求
+
+	// testx 共享 flags
+	flagTxNamespace = ""
+	flagTxRepoUid = ""
+	flagTxRepoVersionUid = ""
+	flagTxFolderUid = ""
+	flagTxCaseUid = ""
+	flagTxPlanUid = ""
+	flagTxIssueUid = ""
+	flagTxUid = ""
+	flagTxReportUid = ""
+	flagTxTemplateUid = ""
+	flagTxData = ""
+	flagTxOffset = 0
+	flagTxLimit = 0
+
+	// testx case flags
+	flagTxCaseSearch = ""
+	flagTxCaseReverse = false
+	flagTxCaseExecOrdering = ""
+	flagTxCaseRevSource = ""
+	flagTxCaseRevMainUid = ""
+	flagTxCaseRevSrcKind = ""
+	flagTxCaseRevSrcUid = ""
+	flagTxCaseRevIsLast = false
+	flagTxCaseBugStatus = ""
+	flagTxCaseBugPriority = ""
+	flagTxCaseBugHandler = ""
+	flagTxCaseBugName = ""
+
+	// testx plan flags
+	flagTxPlanWithStatistic = false
+	flagTxPlanWithDetail = ""
+	flagTxPlanWithDescend = false
+	flagTxPlanWithAncestor = false
+	flagTxPlanName = ""
+	flagTxPlanArchive = ""
+	flagTxPlanStates = nil
+	flagTxPlanItemType = ""
+	flagTxPlanIssueType = ""
+	flagTxPlanRelatedTypes = nil
+	flagTxPlanStatus = ""
+	flagTxPlanSummary = ""
+	flagTxPlanBugId = ""
+
+	// testx report flags
+	flagTxReportSearch = ""
+	flagTxReportStartAt = ""
+	flagTxReportEndAt = ""
+	flagTxReportCreators = nil
+	flagTxReportPlanUids = nil
+	flagTxReportWithAssoc = false
+	flagTxReportTemplate = ""
+	flagTxReportSource = ""
+	flagTxReportSources = nil
+
+	// testx design flags
+	flagTxDesignUid = ""
+	flagTxDesignKind = ""
+	flagTxDesignName = ""
 }
 
 // setupMockServer 创建 mock HTTP server，根据请求路径返回对应的 JSON
@@ -436,7 +496,6 @@ func TestRunBugUpdate_PassesNewFlags(t *testing.T) {
 	defer cleanup()
 
 	flagCC = "cc_user"
-	flagIterationID = "iter002"
 	flagModule = "模块B"
 	flagLabel = "fix"
 	flagBegin = "2026-04-01"
@@ -455,9 +514,6 @@ func TestRunBugUpdate_PassesNewFlags(t *testing.T) {
 	}
 	if captured.Get("cc") != "cc_user" {
 		t.Errorf("cc = %q, want %q", captured.Get("cc"), "cc_user")
-	}
-	if captured.Get("iteration_id") != "iter002" {
-		t.Errorf("iteration_id = %q, want %q", captured.Get("iteration_id"), "iter002")
 	}
 	if captured.Get("current_user") != "updater" {
 		t.Errorf("current_user = %q, want %q", captured.Get("current_user"), "updater")
@@ -1040,7 +1096,7 @@ func TestNewFlagsRegistered_BugCreate(t *testing.T) {
 }
 
 func TestNewFlagsRegistered_BugUpdate(t *testing.T) {
-	for _, name := range []string{"cc", "iteration-id", "module", "label", "begin", "due", "current-user", "resolution", "custom-field"} {
+	for _, name := range []string{"cc", "module", "label", "begin", "due", "current-user", "resolution", "custom-field"} {
 		if bugUpdateCmd.Flags().Lookup(name) == nil {
 			t.Errorf("bug update should register --%s", name)
 		}

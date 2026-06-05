@@ -14,7 +14,6 @@ import (
 var (
 	flagMessage    string
 	flagWebURL     string
-	flagRef        string
 	flagObjectID   string
 	flagCommitID   string
 	flagAuthor     string
@@ -59,7 +58,6 @@ func init() {
 	sourceAddCmd.Flags().StringVar(&flagCommitTime, "commit-time", "", "提交时间")
 	sourceAddCmd.Flags().StringVar(&flagWebURL, "web-url", "", "仓库链接")
 	sourceAddCmd.Flags().StringVar(&flagCommitURL, "commit-url", "", "提交链接")
-	sourceAddCmd.Flags().StringVar(&flagRef, "ref", "", "分支引用")
 
 	sourceListCmd.Flags().StringVar(&flagObjectID, "object-id", "", "TAPD 业务对象 ID（必需）")
 	sourceListCmd.Flags().StringVar(&flagEntityType, "type", "", "业务对象类型 story/bug/task（必需）")
@@ -93,7 +91,6 @@ func runSourceAdd(cmd *cobra.Command, args []string) error {
 		Repo:        flagRepo,
 		RepoID:      flagRepoID,
 		CommitTime:  flagCommitTime,
-		Ref:         flagRef,
 		RepoURL:     flagWebURL,
 		CommitURL:   flagCommitURL,
 	}

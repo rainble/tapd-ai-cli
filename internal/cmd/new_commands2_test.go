@@ -47,7 +47,11 @@ func newCmds2Handler(w http.ResponseWriter, r *http.Request) {
 
 	// ===== source =====
 	case strings.HasSuffix(path, "/code_commit_infos"):
-		w.Write([]byte(`{"status":1,"data":{}}`))
+		if r.Method == http.MethodPost {
+			w.Write([]byte(`{"status":1,"data":{"id":"1001","workspace_id":"12345","message":"fix bug","author":"admin"}}`))
+		} else {
+			w.Write([]byte(`{"status":1,"data":[{"id":"1001","workspace_id":"12345","message":"fix bug","author":"admin"}]}`))
+		}
 	case strings.HasSuffix(path, "/code_commit_objects/workitems"):
 		w.Write([]byte(`{"status":1,"data":{}}`))
 
@@ -86,7 +90,14 @@ func newCmds2Handler(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"status":1,"data":{"count":6}}`))
 	case strings.HasSuffix(path, "/features"):
 		if r.Method == http.MethodPost {
-			w.Write([]byte(`{"status":1,"data":{"Feature":{"id":"1","name":"feat1","workspace_id":"12345"}}}`))
+			r.ParseForm()
+			if r.FormValue("id") != "" {
+				// update: parseOne expects object
+				w.Write([]byte(`{"status":1,"data":{"Feature":{"id":"1","name":"feat1","workspace_id":"12345"}}}`))
+			} else {
+				// create: parseList expects array
+				w.Write([]byte(`{"status":1,"data":[{"Feature":{"id":"1","name":"feat1","workspace_id":"12345"}}]}`))
+			}
 		} else {
 			w.Write([]byte(`{"status":1,"data":[{"Feature":{"id":"1","name":"feat1"}}]}`))
 		}
@@ -339,7 +350,6 @@ func TestNew2RunSourceAdd(t *testing.T) {
 
 	flagMessage = "feat: add login"
 	flagWebURL = "https://git.example.com/repo"
-	flagRef = "refs/heads/main"
 
 	restore, reader := captureStdout(t)
 	err := runSourceAdd(nil, nil)
