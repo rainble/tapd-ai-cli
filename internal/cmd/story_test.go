@@ -13,8 +13,9 @@ import (
 )
 
 func TestBuildSpecLines_StoryUpdateIncludesIterationID(t *testing.T) {
-	lines := buildSpecLines(rootCmd)
-	for _, line := range lines {
+	coreLines, advancedLines := buildSpecLines(rootCmd)
+	allLines := append(coreLines, advancedLines...)
+	for _, line := range allLines {
 		if extractCommandPath(line.text) != "tapd story update" {
 			continue
 		}
@@ -102,8 +103,9 @@ func TestRunStoryUpdate_PassesIterationID(t *testing.T) {
 	if got := captured.Get("workspace_id"); got != "51081496" {
 		t.Fatalf("workspace_id = %q, want %q", got, "51081496")
 	}
-	if got := captured.Get("id"); got != "10001" {
-		t.Fatalf("id = %q, want %q", got, "10001")
+	// 短号 10001 + workspace 51081496 经 expandShortID 展开为 11 + 51081496 + 000010001
+	if got := captured.Get("id"); got != "1151081496000010001" {
+		t.Fatalf("id = %q, want %q", got, "1151081496000010001")
 	}
 	if got := captured.Get("iteration_id"); got != "123" {
 		t.Fatalf("iteration_id = %q, want %q", got, "123")

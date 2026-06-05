@@ -2,6 +2,11 @@
 package cmd
 
 import (
+	"encoding/base64"
+	"mime"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
@@ -59,4 +64,87 @@ func htmlToMarkdown(h string) string {
 		return h
 	}
 	return md
+}
+
+// mdImageRe 匹配 Markdown 图片语法：![alt](path) 或 ![alt](path "title")
+var mdImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(([^)"]+)(?:\s+"[^"]*")?\)`)
+
+// resolveLocalImages 将 Markdown 中引用的本地图片文件转换为 base64 data URI。
+// 仅处理本地文件路径，跳过 HTTP URL、TAPD 内部路径和已有的 data URI。
+func resolveLocalImages(content string) string {
+	return mdImageRe.ReplaceAllStringFunc(content, func(match string) string {
+		subs := mdImageRe.FindStringSubmatch(match)
+		if len(subs) < 3 {
+			return match
+		}
+		imgPath := strings.TrimSpace(subs[2])
+
+		// 跳过非本地路径
+		if strings.HasPrefix(imgPath, "http://") ||
+			strings.HasPrefix(imgPath, "https://") ||
+			strings.HasPrefix(imgPath, "data:") ||
+			strings.HasPrefix(imgPath, "/tfl/") {
+			return match
+		}
+
+		// 展开 ~ 为用户 home 目录
+		if strings.HasPrefix(imgPath, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return match
+			}
+			imgPath = filepath.Join(home, imgPath[2:])
+		}
+
+		// 相对路径转绝对路径
+		if !filepath.IsAbs(imgPath) {
+			wd, err := os.Getwd()
+			if err != nil {
+				return match
+			}
+			imgPath = filepath.Join(wd, imgPath)
+		}
+
+		// 读取文件
+		data, err := os.ReadFile(imgPath)
+		if err != nil {
+			return match
+		}
+
+		// 确定 MIME 类型
+		mimeType := imageMIME(filepath.Ext(imgPath))
+		if mimeType == "" {
+			return match
+		}
+
+		// 构造 data URI 并替换
+		dataURI := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
+		return "![" + subs[1] + "](" + dataURI + ")"
+	})
+}
+
+// imageMIME 根据文件扩展名返回图片 MIME 类型
+func imageMIME(ext string) string {
+	ext = strings.ToLower(ext)
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".bmp":
+		return "image/bmp"
+	case ".webp":
+		return "image/webp"
+	case ".svg":
+		return "image/svg+xml"
+	default:
+		// 尝试系统 MIME 类型检测
+		t := mime.TypeByExtension(ext)
+		if strings.HasPrefix(t, "image/") {
+			return t
+		}
+		return ""
+	}
 }

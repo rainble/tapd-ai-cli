@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"encoding/base64"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -155,6 +158,120 @@ func TestContainsBlockHTML_WithBlockTags(t *testing.T) {
 		got := containsBlockHTML(tt.input)
 		if got != tt.want {
 			t.Errorf("containsBlockHTML(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestResolveLocalImages_LocalFile(t *testing.T) {
+	// 创建临时图片文件
+	tmpDir := t.TempDir()
+	imgPath := filepath.Join(tmpDir, "test.png")
+	imgData := []byte{0x89, 0x50, 0x4E, 0x47} // PNG 文件头（简化）
+	if err := os.WriteFile(imgPath, imgData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := "描述内容\n\n![测试图片](" + imgPath + ")\n\n更多内容"
+	got := resolveLocalImages(content)
+
+	expectedBase64 := base64.StdEncoding.EncodeToString(imgData)
+	expectedURI := "data:image/png;base64," + expectedBase64
+	if !strings.Contains(got, expectedURI) {
+		t.Errorf("resolveLocalImages should embed base64 data URI, got: %s", got)
+	}
+	if !strings.Contains(got, "![测试图片](") {
+		t.Errorf("resolveLocalImages should keep alt text, got: %s", got)
+	}
+}
+
+func TestResolveLocalImages_SkipHTTPURL(t *testing.T) {
+	content := "![img](https://example.com/image.png)"
+	got := resolveLocalImages(content)
+	if got != content {
+		t.Errorf("resolveLocalImages should skip HTTP URLs, got: %s", got)
+	}
+}
+
+func TestResolveLocalImages_SkipTFLPath(t *testing.T) {
+	content := "![img](/tfl/captures/2026-05/tapd_123_base64_456.png)"
+	got := resolveLocalImages(content)
+	if got != content {
+		t.Errorf("resolveLocalImages should skip /tfl/ paths, got: %s", got)
+	}
+}
+
+func TestResolveLocalImages_SkipDataURI(t *testing.T) {
+	content := "![img](data:image/png;base64,abc123)"
+	got := resolveLocalImages(content)
+	if got != content {
+		t.Errorf("resolveLocalImages should skip data URIs, got: %s", got)
+	}
+}
+
+func TestResolveLocalImages_NonexistentFile(t *testing.T) {
+	content := "![img](/nonexistent/path/image.png)"
+	got := resolveLocalImages(content)
+	if got != content {
+		t.Errorf("resolveLocalImages should keep original on file not found, got: %s", got)
+	}
+}
+
+func TestResolveLocalImages_UnsupportedExtension(t *testing.T) {
+	tmpDir := t.TempDir()
+	txtPath := filepath.Join(tmpDir, "file.txt")
+	if err := os.WriteFile(txtPath, []byte("not an image"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := "![img](" + txtPath + ")"
+	got := resolveLocalImages(content)
+	if got != content {
+		t.Errorf("resolveLocalImages should skip non-image files, got: %s", got)
+	}
+}
+
+func TestResolveLocalImages_MultipleImages(t *testing.T) {
+	tmpDir := t.TempDir()
+	img1 := filepath.Join(tmpDir, "a.jpg")
+	img2 := filepath.Join(tmpDir, "b.png")
+	if err := os.WriteFile(img1, []byte{0xFF, 0xD8}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(img2, []byte{0x89, 0x50}, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := "![A](" + img1 + ")\n![B](" + img2 + ")"
+	got := resolveLocalImages(content)
+
+	if !strings.Contains(got, "data:image/jpeg;base64,") {
+		t.Error("expected jpeg data URI")
+	}
+	if !strings.Contains(got, "data:image/png;base64,") {
+		t.Error("expected png data URI")
+	}
+}
+
+func TestImageMIME(t *testing.T) {
+	tests := []struct {
+		ext  string
+		want string
+	}{
+		{".jpg", "image/jpeg"},
+		{".jpeg", "image/jpeg"},
+		{".JPG", "image/jpeg"},
+		{".png", "image/png"},
+		{".gif", "image/gif"},
+		{".bmp", "image/bmp"},
+		{".webp", "image/webp"},
+		{".svg", "image/svg+xml"},
+		{".txt", ""},
+		{".go", ""},
+	}
+	for _, tt := range tests {
+		got := imageMIME(tt.ext)
+		if got != tt.want {
+			t.Errorf("imageMIME(%q) = %q, want %q", tt.ext, got, tt.want)
 		}
 	}
 }

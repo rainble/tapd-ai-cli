@@ -20,7 +20,7 @@ func TestParseFilters_Valid(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rules, err := parseFilters([]string{tc.expr})
+			rules, err := parseWatchFilters([]string{tc.expr})
 			if err != nil {
 				t.Fatalf("parseFilters err: %v", err)
 			}
@@ -40,16 +40,16 @@ func TestParseFilters_Valid(t *testing.T) {
 
 func TestParseFilters_Invalid(t *testing.T) {
 	bads := []string{
-		"",            // 空被跳过，但 ParseFilters 至少要解析一条；用 invalidPair 单独覆盖
-		"no_equals",   // 无等号
-		"=value",      // 空 path
-		"key=",        // 空 value
-		"key=[bad",    // 非法 glob
-		"key=,,",      // 全部空 glob
+		"",          // 空被跳过，但 ParseFilters 至少要解析一条；用 invalidPair 单独覆盖
+		"no_equals", // 无等号
+		"=value",    // 空 path
+		"key=",      // 空 value
+		"key=[bad",  // 非法 glob
+		"key=,,",    // 全部空 glob
 	}
 	for _, expr := range bads {
 		t.Run(expr, func(t *testing.T) {
-			_, err := parseFilters([]string{expr})
+			_, err := parseWatchFilters([]string{expr})
 			// 空字符串不算错（被跳过），但其他必须错
 			if expr == "" {
 				if err != nil {
@@ -71,7 +71,7 @@ func TestMatchAll_AND(t *testing.T) {
 		"event": {"event":"story_create", "workspace_id":"20063271", "story":{"priority":"High"}}
 	}`)
 
-	rules, err := parseFilters([]string{
+	rules, err := parseWatchFilters([]string{
 		"event.event=story_*",
 		"event.workspace_id=20063271",
 	})
@@ -83,7 +83,7 @@ func TestMatchAll_AND(t *testing.T) {
 	}
 
 	// 改 workspace_id 不在白名单
-	rules2, _ := parseFilters([]string{
+	rules2, _ := parseWatchFilters([]string{
 		"event.event=story_*",
 		"event.workspace_id=99999999",
 	})
@@ -101,7 +101,7 @@ func TestMatchAll_NoRulesPasses(t *testing.T) {
 
 func TestMatchAll_MissingFieldFails(t *testing.T) {
 	ev := mustEvent(`{"id":1,"received_at":1,"event":{"event":"story_create"}}`)
-	rules, _ := parseFilters([]string{"event.workspace_id=20063271"})
+	rules, _ := parseWatchFilters([]string{"event.workspace_id=20063271"})
 	if matchAll(ev, rules) {
 		t.Fatal("missing field should make rule fail")
 	}
@@ -109,7 +109,7 @@ func TestMatchAll_MissingFieldFails(t *testing.T) {
 
 func TestMatchAll_ArrayIndex(t *testing.T) {
 	ev := mustEvent(`{"id":1,"received_at":1,"event":{"assignees":["alice","bob"]}}`)
-	rules, _ := parseFilters([]string{"event.assignees.1=bob"})
+	rules, _ := parseWatchFilters([]string{"event.assignees.1=bob"})
 	if !matchAll(ev, rules) {
 		t.Fatal("array index lookup failed")
 	}
@@ -118,7 +118,7 @@ func TestMatchAll_ArrayIndex(t *testing.T) {
 func TestMatchAll_ArrayContains(t *testing.T) {
 	// 不带索引时数组的每个元素都是候选
 	ev := mustEvent(`{"id":1,"received_at":1,"event":{"tags":["urgent","backend","p0"]}}`)
-	rules, _ := parseFilters([]string{"event.tags=urgent"})
+	rules, _ := parseWatchFilters([]string{"event.tags=urgent"})
 	if !matchAll(ev, rules) {
 		t.Fatal("array element OR match failed")
 	}
@@ -126,7 +126,7 @@ func TestMatchAll_ArrayContains(t *testing.T) {
 
 func TestMatchAll_NumericFieldStringified(t *testing.T) {
 	ev := mustEvent(`{"id":42,"received_at":1700000000,"event":{"x":1}}`)
-	rules, _ := parseFilters([]string{"id=42"})
+	rules, _ := parseWatchFilters([]string{"id=42"})
 	if !matchAll(ev, rules) {
 		t.Fatal("numeric stringify match failed")
 	}

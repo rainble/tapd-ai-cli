@@ -60,10 +60,17 @@ var wikiUpdateCmd = &cobra.Command{
 	RunE: runWikiUpdate,
 }
 
+var wikiCountCmd = &cobra.Command{
+	Use:   "count",
+	Short: "查询 Wiki 文档数量",
+	RunE:  runWikiCount,
+}
+
 func init() {
 	wikiListCmd.Flags().IntVar(&flagLimit, "limit", 10, "返回数量限制")
 	wikiListCmd.Flags().IntVar(&flagPage, "page", 1, "页码")
 	wikiListCmd.Flags().StringVar(&flagWikiName, "name", "", "按标题筛选")
+	wikiListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
 	wikiCreateCmd.Flags().StringVar(&flagWikiName, "name", "", "Wiki 标题（必需）")
 	wikiCreateCmd.Flags().StringVar(&flagCreator, "creator", "", "创建人（必需）")
@@ -78,7 +85,7 @@ func init() {
 	wikiUpdateCmd.Flags().StringVar(&flagWikiNote, "note", "", "新备注")
 	wikiUpdateCmd.Flags().StringVar(&flagParentWiki, "parent-wiki-id", "", "新父 Wiki ID")
 
-	wikiCmd.AddCommand(wikiListCmd, wikiShowCmd, wikiCreateCmd, wikiUpdateCmd)
+	wikiCmd.AddCommand(wikiListCmd, wikiShowCmd, wikiCreateCmd, wikiUpdateCmd, wikiCountCmd)
 	rootCmd.AddCommand(wikiCmd)
 }
 
@@ -116,7 +123,7 @@ func runWikiList(cmd *cobra.Command, args []string) error {
 		Page:        flagPage,
 	}
 
-	wikis, err := apiClient.ListWikis(context.Background(), req)
+	wikis, err := listWithFilters[model.Wiki](cmdContext(cmd), apiClient, "/tapd_wikis", req.ToParams(), flagFilter, "Wiki")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
@@ -209,4 +216,17 @@ func runWikiUpdate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return printSuccessResponse(wiki.ID, fmt.Sprintf("%s/%s/markdown_wikis/view/%s", apiClient.WebURL(), flagWorkspaceID, wiki.ID), "")
+}
+
+func runWikiCount(cmd *cobra.Command, args []string) error {
+	req := &model.CountWikisRequest{
+		WorkspaceID: flagWorkspaceID,
+	}
+	count, err := apiClient.CountWikis(context.Background(), req)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, &model.CountResponse{Count: count}, !flagPretty)
 }

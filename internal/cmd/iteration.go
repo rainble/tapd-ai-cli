@@ -15,6 +15,7 @@ var (
 	flagEndDate     string
 	flagCreator     string
 	flagCurrentUser string
+	flagLockTypes   string
 )
 
 // iterationCmd 是 iteration 父命令
@@ -48,6 +49,20 @@ var iterationCountCmd = &cobra.Command{
 	RunE:  runIterationCount,
 }
 
+var iterationLockCmd = &cobra.Command{
+	Use:   "lock <iteration_id>",
+	Short: "锁定迭代",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runIterationLock,
+}
+
+var iterationUnlockCmd = &cobra.Command{
+	Use:   "unlock <iteration_id>",
+	Short: "解锁迭代",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runIterationUnlock,
+}
+
 func init() {
 	iterationListCmd.Flags().StringVar(&flagStatus, "status", "", "按状态筛选（open/done）")
 	iterationListCmd.Flags().StringVar(&flagName, "name", "", "按标题模糊匹配")
@@ -72,9 +87,13 @@ func init() {
 	iterationUpdateCmd.Flags().StringVar(&flagDescription, "description", "", "新描述")
 	iterationUpdateCmd.Flags().StringVar(&flagStatus, "status", "", "新状态（open/done）")
 
+	iterationListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
+
 	iterationCountCmd.Flags().StringVar(&flagStatus, "status", "", "按状态筛选（open/done）")
 
-	iterationCmd.AddCommand(iterationListCmd, iterationCreateCmd, iterationUpdateCmd, iterationCountCmd)
+	iterationLockCmd.Flags().StringVar(&flagLockTypes, "lock-types", "", "锁定对象（__ALL_STORY__/__ALL_BUG__，多个以逗号分隔）")
+
+	iterationCmd.AddCommand(iterationListCmd, iterationCreateCmd, iterationUpdateCmd, iterationCountCmd, iterationLockCmd, iterationUnlockCmd)
 	rootCmd.AddCommand(iterationCmd)
 }
 
@@ -89,7 +108,7 @@ func runIterationList(cmd *cobra.Command, args []string) error {
 		Limit:       flagLimit,
 		Page:        flagPage,
 	}
-	iterations, err := apiClient.ListIterations(context.Background(), req)
+	iterations, err := listWithFilters[model.Iteration](cmdContext(cmd), apiClient, "/iterations", req.ToParams(), flagFilter, "Iteration")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
@@ -191,4 +210,33 @@ func runIterationCount(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return output.PrintJSON(os.Stdout, &model.CountResponse{Count: count}, !flagPretty)
+}
+
+func runIterationLock(cmd *cobra.Command, args []string) error {
+	req := &model.LockIterationRequest{
+		WorkspaceID: flagWorkspaceID,
+		IterationID: args[0],
+		LockTypes:   flagLockTypes,
+	}
+	err := apiClient.LockIteration(context.Background(), req)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, &model.SuccessResponse{Success: true}, !flagPretty)
+}
+
+func runIterationUnlock(cmd *cobra.Command, args []string) error {
+	req := &model.UnlockIterationRequest{
+		WorkspaceID: flagWorkspaceID,
+		IterationID: args[0],
+	}
+	err := apiClient.UnlockIteration(context.Background(), req)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, &model.SuccessResponse{Success: true}, !flagPretty)
 }

@@ -26,9 +26,9 @@ type filterRule struct {
 	globs []string // 至少一项；事件值匹配任一项即视为该规则成立
 }
 
-// parseFilters 把 CLI 传入的多个 --filter 表达式解析成 rule 列表。
+// parseWatchFilters 把 CLI 传入的多个 --filter 表达式解析成 rule 列表。
 // 任何一条不合法直接报错，避免 watch 跑起来后才发现规则无效。
-func parseFilters(exprs []string) ([]filterRule, error) {
+func parseWatchFilters(exprs []string) ([]filterRule, error) {
 	rules := make([]filterRule, 0, len(exprs))
 	for _, expr := range exprs {
 		expr = strings.TrimSpace(expr)

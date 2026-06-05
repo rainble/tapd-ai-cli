@@ -104,7 +104,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	rules, err := parseFilters(flagWatchFilters)
+	rules, err := parseWatchFilters(flagWatchFilters)
 	if err != nil {
 		output.PrintError(os.Stderr, "watch_filter_invalid", err.Error(),
 			"filter format: <path>=<glob>[,<glob>...]")

@@ -40,6 +40,13 @@ var tcaseCreateCmd = &cobra.Command{
 	RunE:  runTCaseCreate,
 }
 
+var tcaseUpdateCmd = &cobra.Command{
+	Use:   "update <tcase_id>",
+	Short: "更新测试用例",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTCaseUpdate,
+}
+
 var tcaseBatchCreateCmd = &cobra.Command{
 	Use:   "batch-create",
 	Short: "批量创建测试用例",
@@ -63,9 +70,18 @@ func init() {
 	tcaseCreateCmd.Flags().StringVar(&flagPriority, "priority", "", "用例等级（high/medium/low）")
 	tcaseCreateCmd.Flags().StringVar(&flagTCaseCreator, "creator", "", "创建人")
 
+	tcaseListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
+
+	tcaseUpdateCmd.Flags().StringVar(&flagName, "name", "", "用例名称")
+	tcaseUpdateCmd.Flags().StringVar(&flagStatus, "status", "", "状态（updating|abandon|normal）")
+	tcaseUpdateCmd.Flags().StringVar(&flagTCasePrecondition, "precondition", "", "前置条件")
+	tcaseUpdateCmd.Flags().StringVar(&flagTCaseSteps, "steps", "", "用例步骤")
+	tcaseUpdateCmd.Flags().StringVar(&flagTCaseExpectation, "expectation", "", "预期结果")
+	tcaseUpdateCmd.Flags().StringVar(&flagPriority, "priority", "", "用例等级（high/medium/low）")
+
 	tcaseBatchCreateCmd.Flags().StringVar(&flagTCasesJSON, "tcases", "", "测试用例 JSON 数组（必需）")
 
-	tcaseCmd.AddCommand(tcaseListCmd, tcaseCreateCmd, tcaseBatchCreateCmd)
+	tcaseCmd.AddCommand(tcaseListCmd, tcaseCreateCmd, tcaseUpdateCmd, tcaseBatchCreateCmd)
 	rootCmd.AddCommand(tcaseCmd)
 }
 
@@ -78,7 +94,7 @@ func runTCaseList(cmd *cobra.Command, args []string) error {
 		Page:        flagPage,
 	}
 
-	tcases, err := apiClient.ListTCases(context.Background(), req)
+	tcases, err := listWithFilters[model.TCase](cmdContext(cmd), apiClient, "/tcases", req.ToParams(), flagFilter, "Tcase")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
@@ -140,25 +156,23 @@ func runTCaseBatchCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// 验证 JSON 格式
-	var tcases []map[string]interface{}
-	if err := json.Unmarshal([]byte(flagTCasesJSON), &tcases); err != nil {
+	var items []model.BatchCreateTCaseItem
+	if err := json.Unmarshal([]byte(flagTCasesJSON), &items); err != nil {
 		output.PrintError(os.Stderr, "invalid_parameter",
 			fmt.Sprintf("invalid JSON for --tcases: %v", err), "")
 		os.Exit(output.ExitParamError)
 		return nil
 	}
 
-	// 为每个用例添加 workspace_id
-	for i := range tcases {
-		if _, ok := tcases[i]["workspace_id"]; !ok {
-			tcases[i]["workspace_id"] = flagWorkspaceID
+	// 为每个用例补全 workspace_id
+	for i := range items {
+		if items[i].WorkspaceID == "" {
+			items[i].WorkspaceID = flagWorkspaceID
 		}
 	}
 
-	tcasesBytes, _ := json.Marshal(tcases)
 	req := &model.BatchCreateTCasesRequest{
-		WorkspaceID: flagWorkspaceID,
-		Data:        string(tcasesBytes),
+		Items: items,
 	}
 
 	data, err := apiClient.BatchCreateTCases(context.Background(), req)
@@ -168,4 +182,24 @@ func runTCaseBatchCreate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return output.PrintJSON(os.Stdout, data, !flagPretty)
+}
+
+func runTCaseUpdate(cmd *cobra.Command, args []string) error {
+	req := &model.UpdateTCaseRequest{
+		WorkspaceID:  flagWorkspaceID,
+		ID:           args[0],
+		Name:         flagName,
+		Status:       flagStatus,
+		Precondition: flagTCasePrecondition,
+		Steps:        flagTCaseSteps,
+		Expectation:  flagTCaseExpectation,
+		Priority:     flagPriority,
+	}
+	result, err := apiClient.UpdateTCase(context.Background(), req)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, result, !flagPretty)
 }

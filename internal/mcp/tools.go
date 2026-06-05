@@ -99,7 +99,7 @@ func toolWorkspaceList(s *Server) *Tool {
 		Description: "List all TAPD workspaces (projects) the current user belongs to. No arguments.",
 		InputSchema: schema(`{"type":"object","properties":{},"additionalProperties":false}`),
 		Handler: func(ctx context.Context, _ json.RawMessage) (interface{}, error) {
-			return s.client.ListWorkspaces(ctx)
+			return s.client.ListWorkspaces(ctx, "", s.client.GetNick())
 		},
 	}
 }
@@ -495,7 +495,6 @@ func toolBugUpdate(s *Server, ws func(string) string) *Tool {
 				"priority_label":{"type":"string"},
 				"severity":{"type":"string"},
 				"current_owner":{"type":"string"},
-				"iteration_id":{"type":"string"},
 				"resolution":{"type":"string"}
 			},
 			"required":["id"],
@@ -533,7 +532,6 @@ func toolBugUpdate(s *Server, ws func(string) string) *Tool {
 				Severity:      optString(args, "severity"),
 				CurrentOwner:  optString(args, "current_owner"),
 				CurrentUser:   currentUser,
-				IterationID:   optString(args, "iteration_id"),
 				Resolution:    optString(args, "resolution"),
 			}
 			return s.client.UpdateBug(ctx, req)

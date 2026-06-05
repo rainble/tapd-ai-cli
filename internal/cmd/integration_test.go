@@ -67,19 +67,14 @@ func TestIntegration_WorkspaceList(t *testing.T) {
 	skipIfNoCredentials(t)
 	c := setupIntegrationClient(t)
 
-	workspaces, err := c.ListWorkspaces(context.Background())
+	workspaces, err := c.ListWorkspaces(context.Background(), "", c.GetNick())
 	if err != nil {
 		t.Fatalf("ListWorkspaces failed: %v", err)
 	}
 	if len(workspaces) == 0 {
 		t.Fatal("Expected at least one workspace")
 	}
-	// 验证没有 organization 类型
-	for _, ws := range workspaces {
-		if ws.Category == "organization" {
-			t.Errorf("ListWorkspaces should filter organization entries, got: %+v", ws)
-		}
-	}
+	t.Logf("Found workspaces: %+v", workspaces)
 	t.Logf("Found %d workspaces", len(workspaces))
 }
 
@@ -289,8 +284,8 @@ func TestIntegration_HelpOutputValid(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	lines := buildSpecLines(rootCmd)
-	printSpecOutput(os.Stdout, rootCmd, lines)
+	coreLines, advancedLines := buildSpecLines(rootCmd)
+	printSpecOutput(os.Stdout, rootCmd, coreLines, advancedLines)
 
 	w.Close()
 	os.Stdout = old
@@ -790,7 +785,7 @@ func TestIntegration_ReleaseList_Client(t *testing.T) {
 	c := setupIntegrationClient(t)
 	wsID := os.Getenv("TAPD_WORKSPACE_ID")
 
-	releases, err := c.ListReleases(context.Background(), &model.WorkspaceIDRequest{
+	releases, err := c.ListReleases(context.Background(), &model.ListReleasesRequest{
 		WorkspaceID: wsID,
 	})
 	if err != nil {
@@ -951,8 +946,8 @@ func TestIntegration_CategoryList_Client(t *testing.T) {
 	c := setupIntegrationClient(t)
 	wsID := os.Getenv("TAPD_WORKSPACE_ID")
 
-	categories, err := c.ListCategories(context.Background(), map[string]string{
-		"workspace_id": wsID,
+	categories, err := c.ListCategories(context.Background(), &model.ListStoryCategoriesRequest{
+		WorkspaceID: wsID,
 	})
 	if err != nil {
 		t.Fatalf("ListCategories failed: %v", err)

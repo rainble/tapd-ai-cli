@@ -33,6 +33,7 @@ var bugListCmd = &cobra.Command{
 var bugShowCmd = &cobra.Command{
 	Use:   "show <bug_id>",
 	Short: "查看缺陷详情",
+	Long:  "查看缺陷详情。<bug_id> 支持 TAPD 长 ID，或 ≤9 位的短号（短号会按当前 workspace 自动展开）。",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runBugShow,
 }
@@ -50,7 +51,8 @@ var bugCreateCmd = &cobra.Command{
 var bugUpdateCmd = &cobra.Command{
 	Use:   "update <bug_id>",
 	Short: "更新缺陷",
-	Long: `更新缺陷，描述支持三种输入方式：
+	Long: `更新缺陷。<bug_id> 支持 TAPD 长 ID，或 ≤9 位的短号（短号会按当前 workspace 自动展开）。
+描述支持三种输入方式：
   1. --description <text>  直接传入描述文本
   2. --file <path>         从本地文件读取描述内容
   3. echo "..." | tapd bug update <bug_id>  通过 stdin 管道输入`,
@@ -107,7 +109,6 @@ func init() {
 	bugUpdateCmd.Flags().StringVar(&flagSeverity, "severity", "", "新严重程度（fatal/serious/normal/prompt/advice）")
 	bugUpdateCmd.Flags().StringVar(&flagOwner, "owner", "", "新处理人（current_owner）")
 	bugUpdateCmd.Flags().StringVar(&flagCC, "cc", "", "新抄送人")
-	bugUpdateCmd.Flags().StringVar(&flagIterationID, "iteration-id", "", "新迭代 ID")
 	bugUpdateCmd.Flags().StringVar(&flagModule, "module", "", "新模块")
 	bugUpdateCmd.Flags().StringVar(&flagLabel, "label", "", "新标签（多个以竖线分隔）")
 	bugUpdateCmd.Flags().StringVar(&flagBegin, "begin", "", "新预计开始日期（格式：2006-01-02）")
@@ -115,6 +116,8 @@ func init() {
 	bugUpdateCmd.Flags().StringVar(&flagCurrentUser, "current-user", "", "变更人")
 	bugUpdateCmd.Flags().StringVar(&flagResolution, "resolution", "", "解决方法")
 	bugUpdateCmd.Flags().StringArrayVar(&flagCustomField, "custom-field", nil, "自定义字段（可重复，格式：key=value）")
+
+	bugListCmd.Flags().StringArrayVar(&flagFilter, "filter", nil, filterFlagDesc)
 
 	bugCountCmd.Flags().StringVar(&flagStatus, "status", "", "按状态筛选（用 workflow status-map 查询可用值）")
 
@@ -146,7 +149,7 @@ func runBugList(cmd *cobra.Command, args []string) error {
 		Limit:         flagLimit,
 		Page:          flagPage,
 	}
-	bugs, err := apiClient.ListBugs(context.Background(), req)
+	bugs, err := listWithFilters[model.Bug](cmdContext(cmd), apiClient, "/bugs", req.ToParams(), flagFilter, "Bug")
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
@@ -169,7 +172,9 @@ func runBugList(cmd *cobra.Command, args []string) error {
 }
 
 func runBugShow(cmd *cobra.Command, args []string) error {
-	bug, err := apiClient.GetBug(context.Background(), flagWorkspaceID, args[0])
+	// 短号自动展开为 TAPD 长 ID，向 SDK / printComments 传同一个展开后的 id
+	id := expandShortID(args[0], flagWorkspaceID)
+	bug, err := apiClient.GetBug(context.Background(), flagWorkspaceID, id)
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "")
 		os.Exit(output.ExitAPIError)
@@ -179,7 +184,7 @@ func runBugShow(cmd *cobra.Command, args []string) error {
 	if err := printDetail(bug, "description"); err != nil {
 		return err
 	}
-	printComments(flagWorkspaceID, "bug", args[0])
+	printComments(flagWorkspaceID, "bug", id)
 	return nil
 }
 
@@ -230,9 +235,11 @@ func runBugUpdate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// 短号自动展开为 TAPD 长 ID
+	id := expandShortID(args[0], flagWorkspaceID)
 	req := &model.UpdateBugRequest{
 		WorkspaceID:   flagWorkspaceID,
-		ID:            args[0],
+		ID:            id,
 		Title:         flagTitle,
 		Description:   description,
 		VStatus:       flagStatus,
@@ -240,7 +247,6 @@ func runBugUpdate(cmd *cobra.Command, args []string) error {
 		Severity:      flagSeverity,
 		CurrentOwner:  flagOwner,
 		CC:            flagCC,
-		IterationID:   flagIterationID,
 		Module:        flagModule,
 		Label:         flagLabel,
 		Begin:         flagBegin,
@@ -255,7 +261,21 @@ func runBugUpdate(cmd *cobra.Command, args []string) error {
 		os.Exit(output.ExitAPIError)
 		return nil
 	}
-	return printSuccessResponse(bug.ID, fmt.Sprintf("%s/%s/bugtrace/bugs/view/%s", apiClient.WebURL(), flagWorkspaceID, bug.ID), "")
+
+	// 把服务端返回的"更新后实际状态/处理人"一并吐进成功输出：
+	// TAPD 的 update 接口会回传更新后的工单对象，bug.Status / bug.CurrentOwner
+	// 即服务端实际生效的值。调用方据此即可确认状态已落地，无需再 `bug show` 验一次（省 TAPD API）。
+	// 若请求了 status 但返回值不符（workflow 拒绝该流转 / 缺 resolution 等），打 warning 提醒。
+	if flagStatus != "" && bug.Status != "" && bug.Status != flagStatus {
+		fmt.Fprintf(os.Stderr, "WARNING: 请求 status=%s，但服务端返回 status=%s（流转可能未生效，检查 workflow / resolution 等必填项）\n", flagStatus, bug.Status)
+	}
+	return output.PrintJSON(os.Stdout, map[string]interface{}{
+		"success":        true,
+		"id":             bug.ID,
+		"url":            fmt.Sprintf("%s/%s/bugtrace/bugs/view/%s", apiClient.WebURL(), flagWorkspaceID, bug.ID),
+		"current_status": bug.Status,
+		"current_owner":  bug.CurrentOwner,
+	}, !flagPretty)
 }
 
 func runBugCount(cmd *cobra.Command, args []string) error {

@@ -39,15 +39,31 @@ var workspaceInfoCmd = &cobra.Command{
 	RunE:  runWorkspaceInfo,
 }
 
+// workspaceUsersCmd 查看项目成员
+var workspaceUsersCmd = &cobra.Command{
+	Use:   "users",
+	Short: "查看项目成员列表",
+	RunE:  runWorkspaceUsers,
+}
+
+// workspaceRolesCmd 查看用户组
+var workspaceRolesCmd = &cobra.Command{
+	Use:   "roles",
+	Short: "查看用户组 ID 对照关系",
+	RunE:  runWorkspaceRoles,
+}
+
 func init() {
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceSwitchCmd)
 	workspaceCmd.AddCommand(workspaceInfoCmd)
+	workspaceCmd.AddCommand(workspaceUsersCmd)
+	workspaceCmd.AddCommand(workspaceRolesCmd)
 	rootCmd.AddCommand(workspaceCmd)
 }
 
 func runWorkspaceList(cmd *cobra.Command, args []string) error {
-	workspaces, err := apiClient.ListWorkspaces(context.Background())
+	workspaces, err := apiClient.ListWorkspaces(context.Background(), "", apiClient.GetNick())
 	if err != nil {
 		output.PrintError(os.Stderr, "api_error", err.Error(), "Check your credentials and network connection.")
 		os.Exit(output.ExitAPIError)
@@ -78,6 +94,48 @@ func runWorkspaceSwitch(cmd *cobra.Command, args []string) error {
 		Success:     true,
 		WorkspaceID: workspaceID,
 	}, !flagPretty)
+}
+
+func runWorkspaceUsers(cmd *cobra.Command, args []string) error {
+	if flagWorkspaceID == "" {
+		output.PrintError(os.Stderr, "workspace_required",
+			"No workspace ID configured",
+			"Run 'tapd workspace switch <id>' or use --workspace-id flag.")
+		os.Exit(output.ExitParamError)
+		return nil
+	}
+
+	users, err := apiClient.GetWorkspaceUsers(context.Background(), &model.GetWorkspaceUsersRequest{
+		WorkspaceID: flagWorkspaceID,
+	})
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	resp := &model.ListResponse{
+		Items: users,
+		Total: len(users),
+	}
+	return output.PrintJSON(os.Stdout, resp, !flagPretty)
+}
+
+func runWorkspaceRoles(cmd *cobra.Command, args []string) error {
+	if flagWorkspaceID == "" {
+		output.PrintError(os.Stderr, "workspace_required",
+			"No workspace ID configured",
+			"Run 'tapd workspace switch <id>' or use --workspace-id flag.")
+		os.Exit(output.ExitParamError)
+		return nil
+	}
+
+	roles, err := apiClient.GetRoles(context.Background(), flagWorkspaceID)
+	if err != nil {
+		output.PrintError(os.Stderr, "api_error", err.Error(), "")
+		os.Exit(output.ExitAPIError)
+		return nil
+	}
+	return output.PrintJSON(os.Stdout, roles, !flagPretty)
 }
 
 func runWorkspaceInfo(cmd *cobra.Command, args []string) error {
