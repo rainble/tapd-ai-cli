@@ -77,7 +77,7 @@ func init() {
 		"输出事件时使用带缩进的 JSON（默认紧凑单行）")
 	watchCmd.Flags().BoolVar(&flagWatchOnce, "once", false,
 		"收到一个事件后立刻退出，常用于联调")
-	watchCmd.Flags().StringSliceVar(&flagWatchFilters, "filter", nil,
+	watchCmd.Flags().StringArrayVar(&flagWatchFilters, "filter", nil,
 		"过滤事件：<path>=<glob>[,<glob>...]，可多次指定（多 filter 间 AND，单 filter 内 OR）。\n"+
 			"示例：--filter event.event=story_*,bug_create --filter event.workspace_id=20063271")
 	watchCmd.Flags().BoolVar(&flagWatchNoState, "no-state", false,

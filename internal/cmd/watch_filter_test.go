@@ -3,6 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/spf13/pflag"
 )
 
 func TestParseFilters_Valid(t *testing.T) {
@@ -35,6 +37,25 @@ func TestParseFilters_Valid(t *testing.T) {
 				t.Fatalf("globs mismatch: want %v got %v", tc.globs, r.globs)
 			}
 		})
+	}
+}
+
+func TestWatchFilterFlagPreservesComma(t *testing.T) {
+	var filters []string
+	flags := pflag.NewFlagSet("watch", pflag.ContinueOnError)
+	flags.StringArrayVar(&filters, "filter", nil, "")
+	if err := flags.Parse([]string{"--filter", "event.event=bug_create,bug_update"}); err != nil {
+		t.Fatalf("parse flags err: %v", err)
+	}
+	if len(filters) != 1 || filters[0] != "event.event=bug_create,bug_update" {
+		t.Fatalf("filters=%v, want one comma-preserved filter", filters)
+	}
+	rules, err := parseWatchFilters(filters)
+	if err != nil {
+		t.Fatalf("parseWatchFilters err: %v", err)
+	}
+	if len(rules) != 1 || !equalSlice(rules[0].globs, []string{"bug_create", "bug_update"}) {
+		t.Fatalf("rules=%v, want one OR rule with two globs", rules)
 	}
 }
 
