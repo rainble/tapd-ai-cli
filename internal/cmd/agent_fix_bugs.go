@@ -31,6 +31,9 @@ var (
 	flagAgentAllowDirty      bool
 	flagAgentOnce            bool
 	flagAgentOutputLimit     int
+	flagAgentBranchStrategy  string
+	flagAgentMRRemote        string
+	flagAgentMRBranchPrefix  string
 )
 
 var agentFixBugsBlockedEventID uint64
@@ -61,6 +64,9 @@ type agentFixBugsConfig struct {
 	once            bool
 	outputLimit     int
 	workspaceID     string
+	branchStrategy  string
+	mrRemote        string
+	mrBranchPrefix  string
 }
 
 func init() {
@@ -77,6 +83,9 @@ func init() {
 	agentFixBugsCmd.Flags().BoolVar(&flagAgentAllowDirty, "allow-dirty", false, "允许在 dirty working tree 中运行 agent")
 	agentFixBugsCmd.Flags().BoolVar(&flagAgentOnce, "once", false, "处理一个 bug 事件后退出")
 	agentFixBugsCmd.Flags().IntVar(&flagAgentOutputLimit, "output-limit", defaultCommandOutputLimit, "写入 TAPD 评论的单段输出截断字节数")
+	agentFixBugsCmd.Flags().StringVar(&flagAgentBranchStrategy, "branch-strategy", "current", "本地分支策略：current 或 linked-mr")
+	agentFixBugsCmd.Flags().StringVar(&flagAgentMRRemote, "mr-remote", "origin", "linked-mr 策略使用的 Git remote")
+	agentFixBugsCmd.Flags().StringVar(&flagAgentMRBranchPrefix, "mr-branch-prefix", "tapd-agent/mr-", "linked-mr 策略创建的本地分支名前缀")
 
 	agentCmd.AddCommand(agentFixBugsCmd)
 	rootCmd.AddCommand(agentCmd)
@@ -99,6 +108,9 @@ func resolveAgentFixBugsConfig() (agentFixBugsConfig, error) {
 		once:            flagAgentOnce,
 		outputLimit:     flagAgentOutputLimit,
 		workspaceID:     flagWorkspaceID,
+		branchStrategy:  fallbackString(flagAgentBranchStrategy, "current"),
+		mrRemote:        fallbackString(flagAgentMRRemote, "origin"),
+		mrBranchPrefix:  fallbackString(flagAgentMRBranchPrefix, "tapd-agent/mr-"),
 	}
 	if cfg.outputLimit <= 0 {
 		cfg.outputLimit = defaultCommandOutputLimit
@@ -108,6 +120,15 @@ func resolveAgentFixBugsConfig() (agentFixBugsConfig, error) {
 	}
 	if cfg.onSuccessStatus != "" && strings.TrimSpace(cfg.testCmd) == "" {
 		return cfg, fmt.Errorf("--test-cmd is required when --on-success-status is set")
+	}
+	if cfg.branchStrategy != "current" && cfg.branchStrategy != branchStrategyLinkedMR {
+		return cfg, fmt.Errorf("--branch-strategy must be current or linked-mr")
+	}
+	if err := validateGitArg(cfg.mrRemote, "--mr-remote"); err != nil {
+		return cfg, err
+	}
+	if err := validateGitArg(cfg.mrBranchPrefix, "--mr-branch-prefix"); err != nil {
+		return cfg, err
 	}
 	parsed, err := url.Parse(cfg.endpoint)
 	if cfg.endpoint == "" || err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -136,6 +157,9 @@ func runAgentFixBugs(cmd *cobra.Command, args []string) error {
 		resolution:      cfg.resolution,
 		allowDirty:      cfg.allowDirty,
 		outputLimit:     cfg.outputLimit,
+		branchStrategy:  cfg.branchStrategy,
+		mrRemote:        cfg.mrRemote,
+		mrBranchPrefix:  cfg.mrBranchPrefix,
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

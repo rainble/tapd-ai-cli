@@ -30,6 +30,9 @@ func TestResolveAgentFixBugsConfig(t *testing.T) {
 	if cfg.outputLimit != defaultCommandOutputLimit {
 		t.Fatalf("outputLimit=%d", cfg.outputLimit)
 	}
+	if cfg.branchStrategy != "current" || cfg.mrRemote != "origin" || cfg.mrBranchPrefix != "tapd-agent/mr-" {
+		t.Fatalf("branch defaults=%+v", cfg)
+	}
 }
 
 func TestResolveAgentFixBugsConfigFromAppConfig(t *testing.T) {
@@ -77,6 +80,39 @@ func TestResolveAgentFixBugsConfigSuccessStatusRequiresTestCommand(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "--test-cmd") {
 		t.Fatalf("error should mention --test-cmd, got %v", err)
+	}
+}
+
+func TestResolveAgentFixBugsConfigLinkedMR(t *testing.T) {
+	t.Cleanup(resetAgentFixBugsTestState)
+	resetAgentFixBugsTestState()
+
+	flagAgentRepo = "/repo"
+	flagWatchEndpoint = "https://flag/events"
+	flagAgentBranchStrategy = "linked-mr"
+	flagAgentMRRemote = "upstream"
+	flagAgentMRBranchPrefix = "tapd/mr-"
+
+	cfg, err := resolveAgentFixBugsConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.branchStrategy != "linked-mr" || cfg.mrRemote != "upstream" || cfg.mrBranchPrefix != "tapd/mr-" {
+		t.Fatalf("cfg=%+v", cfg)
+	}
+}
+
+func TestResolveAgentFixBugsConfigInvalidBranchStrategy(t *testing.T) {
+	t.Cleanup(resetAgentFixBugsTestState)
+	resetAgentFixBugsTestState()
+
+	flagAgentRepo = "/repo"
+	flagWatchEndpoint = "https://flag/events"
+	flagAgentBranchStrategy = "push-directly"
+
+	_, err := resolveAgentFixBugsConfig()
+	if err == nil || !strings.Contains(err.Error(), "--branch-strategy") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -192,6 +228,9 @@ func resetAgentFixBugsTestState() {
 	flagAgentAllowDirty = false
 	flagAgentOnce = false
 	flagAgentOutputLimit = defaultCommandOutputLimit
+	flagAgentBranchStrategy = "current"
+	flagAgentMRRemote = "origin"
+	flagAgentMRBranchPrefix = "tapd-agent/mr-"
 	flagWatchEndpoint = ""
 	flagWatchToken = ""
 	flagWorkspaceID = ""

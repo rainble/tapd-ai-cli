@@ -11,6 +11,7 @@ import (
 // bugFixTapdClient 抽象 TAPD 读写，生产实现包装 SDK，测试使用 fake。
 type bugFixTapdClient interface {
 	GetBugDetail(ctx context.Context, workspaceID, bugID string) (bugFixBugDetail, error)
+	GetStoryDetail(ctx context.Context, workspaceID, storyID string) (bugFixStoryDetail, error)
 	AddBugComment(ctx context.Context, workspaceID, bugID, description string) error
 	UpdateBugStatus(ctx context.Context, update bugStatusUpdate) error
 }
@@ -50,6 +51,9 @@ type bugFixWorker struct {
 	resolution      string
 	allowDirty      bool
 	outputLimit     int
+	branchStrategy  string
+	mrRemote        string
+	mrBranchPrefix  string
 }
 
 func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) bugFixResult {
@@ -72,6 +76,11 @@ func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) 
 		if dirty {
 			return w.fail(ctx, result, "dirty_repo", out, limit)
 		}
+	}
+
+	branch, err := w.prepareBranch(ctx, bug, limit)
+	if err != nil {
+		return w.fail(ctx, result, "branch_prepare", err.Error(), limit)
 	}
 
 	if w.onStartStatus != "" {
@@ -102,7 +111,7 @@ func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) 
 		verified = true
 	}
 
-	comment := buildSuccessComment(agent, test, verified)
+	comment := buildSuccessComment(agent, test, verified, branch)
 	if err := w.tapd.AddBugComment(ctx, target.WorkspaceID, target.BugID, comment); err != nil {
 		result.Verified = verified
 		if statusErr := w.updateFailureStatus(ctx, result); statusErr != nil {
@@ -161,6 +170,22 @@ func (w *bugFixWorker) failNoComment(base bugFixResult, stage, detail string, li
 	return base
 }
 
+func (w *bugFixWorker) prepareBranch(ctx context.Context, bug bugFixBugDetail, limit int) (*bugFixBranchContext, error) {
+	strategy := fallbackString(w.branchStrategy, "current")
+	switch strategy {
+	case "current":
+		return nil, nil
+	case "linked-mr":
+		return prepareLinkedMRBranch(ctx, w.tapd, w.runner, w.repo, bug, bugFixBranchOptions{
+			Remote:       fallbackString(w.mrRemote, "origin"),
+			BranchPrefix: fallbackString(w.mrBranchPrefix, "tapd-agent/mr-"),
+			Limit:        limit,
+		})
+	default:
+		return nil, fmt.Errorf("unsupported branch strategy %q", strategy)
+	}
+}
+
 func (w *bugFixWorker) normalizedOutputLimit() int {
 	if w.outputLimit > 0 {
 		return w.outputLimit
@@ -200,11 +225,38 @@ func (sdkBugFixTapdClient) GetBugDetail(ctx context.Context, workspaceID, bugID 
 		WorkspaceID:  workspaceID,
 		ID:           bug.ID,
 		Title:        bug.Title,
+		StoryID:      bug.StoryID,
 		Status:       bug.Status,
 		CurrentOwner: bug.CurrentOwner,
 		Severity:     bug.Severity,
 		Priority:     bug.PriorityLabel,
 		Description:  htmlToMarkdown(bug.Description),
+	}
+	for _, c := range comments {
+		mapped.Comments = append(mapped.Comments, bugFixComment{
+			Author:      c.Author,
+			Created:     c.Created,
+			Description: htmlToMarkdown(c.Description),
+		})
+	}
+	return mapped, nil
+}
+
+func (sdkBugFixTapdClient) GetStoryDetail(ctx context.Context, workspaceID, storyID string) (bugFixStoryDetail, error) {
+	story, err := apiClient.GetStory(ctx, workspaceID, storyID)
+	if err != nil {
+		return bugFixStoryDetail{}, err
+	}
+	comments, _ := apiClient.ListComments(ctx, &model.ListCommentsRequest{
+		WorkspaceID: workspaceID,
+		EntryType:   "stories",
+		EntryID:     storyID,
+	})
+	mapped := bugFixStoryDetail{
+		WorkspaceID: workspaceID,
+		ID:          story.ID,
+		Title:       story.Name,
+		Description: htmlToMarkdown(story.Description),
 	}
 	for _, c := range comments {
 		mapped.Comments = append(mapped.Comments, bugFixComment{

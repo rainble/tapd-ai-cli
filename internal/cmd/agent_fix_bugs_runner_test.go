@@ -10,6 +10,7 @@ import (
 
 type fakeBugFixTapd struct {
 	bug              bugFixBugDetail
+	stories          map[string]bugFixStoryDetail
 	comments         []string
 	updates          []bugStatusUpdate
 	failComment      bool
@@ -20,6 +21,19 @@ func (f *fakeBugFixTapd) GetBugDetail(ctx context.Context, workspaceID, bugID st
 	f.bug.WorkspaceID = workspaceID
 	f.bug.ID = bugID
 	return f.bug, nil
+}
+
+func (f *fakeBugFixTapd) GetStoryDetail(ctx context.Context, workspaceID, storyID string) (bugFixStoryDetail, error) {
+	if f.stories == nil {
+		return bugFixStoryDetail{}, errTestFailure
+	}
+	story, ok := f.stories[storyID]
+	if !ok {
+		return bugFixStoryDetail{}, errTestFailure
+	}
+	story.WorkspaceID = workspaceID
+	story.ID = storyID
+	return story, nil
 }
 
 func (f *fakeBugFixTapd) AddBugComment(ctx context.Context, workspaceID, bugID, description string) error {
@@ -90,6 +104,110 @@ func TestBugFixWorkerHandleSuccess(t *testing.T) {
 	}
 	if tapd.updates[0].Status != "in_progress" || tapd.updates[1].Status != "resolved" {
 		t.Fatalf("unexpected updates=%+v", tapd.updates)
+	}
+}
+
+func TestBugFixWorkerLinkedMRUsesStoryMRBeforeBugMR(t *testing.T) {
+	tapd := &fakeBugFixTapd{
+		bug: bugFixBugDetail{
+			Title:       "panic",
+			Description: "bug mentions http://git.example.com/team/repo/-/merge_requests/12",
+			StoryID:     "story-1",
+			Comments: []bugFixComment{{
+				Description: "bug MR http://git.example.com/team/repo/-/merge_requests/13",
+			}},
+		},
+		stories: map[string]bugFixStoryDetail{
+			"story-1": {
+				Title: "linked story",
+				Comments: []bugFixComment{{
+					Description: "story MR http://git.example.com/team/repo/-/merge_requests/99",
+				}},
+			},
+		},
+	}
+	var commands []string
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		commands = append(commands, cfg.Command)
+		switch cfg.Command {
+		case "git status --porcelain":
+			return commandRunResult{}
+		case "git fetch origin merge-requests/99/head":
+			return commandRunResult{Stdout: "fetched"}
+		case "git checkout -B tapd-agent/mr-99 FETCH_HEAD":
+			return commandRunResult{Stdout: "checked out"}
+		case "agent":
+			return commandRunResult{Stdout: "changed"}
+		case "go test ./...":
+			return commandRunResult{Stdout: "ok"}
+		default:
+			t.Fatalf("unexpected command %q", cfg.Command)
+			return commandRunResult{}
+		}
+	})
+	worker := bugFixWorker{
+		tapd:           tapd,
+		runner:         runner,
+		repo:           "/repo",
+		agentCmd:       "agent",
+		testCmd:        "go test ./...",
+		branchStrategy: "linked-mr",
+		mrRemote:       "origin",
+		mrBranchPrefix: "tapd-agent/mr-",
+		outputLimit:    1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "success" || !res.Verified {
+		t.Fatalf("result=%+v", res)
+	}
+	wantCommands := []string{
+		"git status --porcelain",
+		"git fetch origin merge-requests/99/head",
+		"git checkout -B tapd-agent/mr-99 FETCH_HEAD",
+		"agent",
+		"go test ./...",
+	}
+	if strings.Join(commands, "\n") != strings.Join(wantCommands, "\n") {
+		t.Fatalf("commands=%v, want %v", commands, wantCommands)
+	}
+	if len(tapd.comments) != 1 || !strings.Contains(tapd.comments[0], "tapd-agent/mr-99") {
+		t.Fatalf("comments=%v", tapd.comments)
+	}
+}
+
+func TestBugFixWorkerLinkedMRFailsWhenNoMRFound(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", StoryID: "story-1"}, stories: map[string]bugFixStoryDetail{
+		"story-1": {Title: "story without mr"},
+	}}
+	var commands []string
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		commands = append(commands, cfg.Command)
+		if cfg.Command == "git status --porcelain" {
+			return commandRunResult{}
+		}
+		t.Fatalf("agent/git fetch should not run without linked MR: %q", cfg.Command)
+		return commandRunResult{}
+	})
+	worker := bugFixWorker{
+		tapd:           tapd,
+		runner:         runner,
+		repo:           "/repo",
+		agentCmd:       "agent",
+		testCmd:        "go test ./...",
+		branchStrategy: "linked-mr",
+		mrRemote:       "origin",
+		mrBranchPrefix: "tapd-agent/mr-",
+		outputLimit:    1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "failed" || res.Stage != "branch_prepare" {
+		t.Fatalf("result=%+v", res)
+	}
+	if len(commands) != 1 || commands[0] != "git status --porcelain" {
+		t.Fatalf("commands=%v", commands)
+	}
+	if len(tapd.comments) != 1 || !strings.Contains(tapd.comments[0], "no GitLab MR link found") {
+		t.Fatalf("comments=%v", tapd.comments)
 	}
 }
 
@@ -370,12 +488,16 @@ func TestSDKBugFixTapdClientMapsBugAndComments(t *testing.T) {
 		switch {
 		case strings.Contains(path, "/comments") && r.Method == http.MethodPost:
 			w.Write([]byte(`{"status":1,"data":{"Comment":{"id":"c2","author":"agent","description":"ok"}}}`))
+		case strings.Contains(path, "/comments") && r.URL.Query().Get("entry_type") == "stories":
+			w.Write([]byte(`{"status":1,"data":[{"Comment":{"id":"s-c1","author":"pm","created":"2026-06-04","description":"<p>MR: http://git.example.com/team/repo/-/merge_requests/99</p>"}}]}`))
 		case strings.Contains(path, "/comments"):
 			w.Write([]byte(`{"status":1,"data":[{"Comment":{"id":"c1","author":"bob","created":"2026-06-04","description":"<p>please check</p>"}}]}`))
+		case strings.Contains(path, "/stories"):
+			w.Write([]byte(`{"status":1,"data":[{"Story":{"id":"789","name":"Linked Story","description":"<p>Story Desc</p>","status":"open"}}]}`))
 		case strings.Contains(path, "/bugs") && r.Method == http.MethodPost:
 			w.Write([]byte(`{"status":1,"data":{"Bug":{"id":"456","title":"Test Bug","url":"http://test/bug/456"}}}`))
 		default:
-			w.Write([]byte(`{"status":1,"data":[{"Bug":{"id":"456","title":"Test Bug","description":"<p>Desc</p>","status":"new","current_owner":"alice","severity":"normal","priority_label":"high"}}]}`))
+			w.Write([]byte(`{"status":1,"data":[{"Bug":{"id":"456","title":"Test Bug","description":"<p>Desc</p>","story_id":"789","status":"new","current_owner":"alice","severity":"normal","priority_label":"high"}}]}`))
 		}
 	}
 	_, cleanup := setupMockServer(t, handler)
@@ -392,6 +514,20 @@ func TestSDKBugFixTapdClientMapsBugAndComments(t *testing.T) {
 	}
 	if !strings.Contains(got.Description, "Desc") || len(got.Comments) != 1 {
 		t.Fatalf("detail markdown/comments=%+v", got)
+	}
+	if got.StoryID != "789" {
+		t.Fatalf("story id=%q", got.StoryID)
+	}
+
+	story, err := c.GetStoryDetail(context.Background(), "123", got.StoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if story.ID != "789" || story.Title != "Linked Story" || len(story.Comments) != 1 {
+		t.Fatalf("story detail=%+v", story)
+	}
+	if !strings.Contains(story.Comments[0].Description, "99") {
+		t.Fatalf("story comments=%+v", story.Comments)
 	}
 
 	if err := c.AddBugComment(context.Background(), "123", "456", "fixed by agent"); err != nil {

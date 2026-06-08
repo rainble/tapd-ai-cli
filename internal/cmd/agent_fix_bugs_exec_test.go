@@ -153,6 +153,7 @@ func TestBuildSuccessCommentUnverified(t *testing.T) {
 		commandRunResult{Stdout: "agent out"},
 		commandRunResult{Stderr: "test err"},
 		false,
+		nil,
 	)
 	if !strings.Contains(comment, "AI agent run completed") {
 		t.Fatalf("comment missing neutral headline:\n%s", comment)

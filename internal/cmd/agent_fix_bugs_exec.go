@@ -145,6 +145,7 @@ func commandFailureDetail(res commandRunResult) string {
 type bugFixBugDetail struct {
 	WorkspaceID  string
 	ID           string
+	StoryID      string
 	Title        string
 	Status       string
 	CurrentOwner string
@@ -152,6 +153,15 @@ type bugFixBugDetail struct {
 	Priority     string
 	Description  string
 	Comments     []bugFixComment
+}
+
+// bugFixStoryDetail 是缺陷关联需求中用于定位 MR 的最小详情。
+type bugFixStoryDetail struct {
+	WorkspaceID string
+	ID          string
+	Title       string
+	Description string
+	Comments    []bugFixComment
 }
 
 // bugFixComment 是 agent prompt 所需的评论快照。
@@ -185,9 +195,13 @@ func buildAgentPrompt(bug bugFixBugDetail, repo, testCmd string) string {
 	return b.String()
 }
 
-func buildSuccessComment(agent commandRunResult, test commandRunResult, verified bool) string {
-	return fmt.Sprintf("AI agent run completed.\n\nVerified: %v\n\nAgent stdout:\n%s\n\nAgent stderr:\n%s\n\nTest stdout:\n%s\n\nTest stderr:\n%s",
-		verified, agent.Stdout, agent.Stderr, test.Stdout, test.Stderr)
+func buildSuccessComment(agent commandRunResult, test commandRunResult, verified bool, branch *bugFixBranchContext) string {
+	branchText := ""
+	if branch != nil {
+		branchText = fmt.Sprintf("\n\nMR: %s\nBranch: %s\nMR source: %s", branch.MRURL, branch.LocalBranch, branch.Source)
+	}
+	return fmt.Sprintf("AI agent run completed.\n\nVerified: %v%s\n\nAgent stdout:\n%s\n\nAgent stderr:\n%s\n\nTest stdout:\n%s\n\nTest stderr:\n%s",
+		verified, branchText, agent.Stdout, agent.Stderr, test.Stdout, test.Stderr)
 }
 
 func buildFailureComment(stage string, detail string) string {

@@ -289,11 +289,17 @@ glob 用 `*` / `?` / `[abc]` 通配，逗号要转义时写 `\,`。
 命令会拉取 bug 详情，调用本地 coding agent 修改 `--repo` 指向的仓库，运行 `--test-cmd`
 验证，然后给 bug 写评论。只有配置了 `--on-success-status` 时才会自动流转状态。
 
+如果希望自动对应到 TAPD 绑定的 GitLab MR，可开启 `--branch-strategy linked-mr`。
+该模式会优先读取 bug 关联需求里的 MR 链接，其次读取 bug 自身描述/评论里的 MR 链接，然后在本地执行
+`git fetch <remote> merge-requests/<iid>/head` 并 checkout 到 `tapd-agent/mr-<iid>`。
+默认仍不会自动 commit、push、创建 MR、部署或合并。
+
 推荐先用一次性、无状态流转模式试跑：
 
 ```bash
 tapd agent fix-bugs \
   --repo /Users/sunruoyu/go/src/vas/app/upower \
+  --branch-strategy linked-mr \
   --test-cmd "go test ./..." \
   --on-start-status "" \
   --on-success-status "" \
@@ -305,6 +311,7 @@ tapd agent fix-bugs \
 ```bash
 tapd agent fix-bugs \
   --repo /Users/sunruoyu/go/src/vas/app/upower \
+  --branch-strategy linked-mr \
   --test-cmd "go test ./..." \
   --on-start-status in_progress \
   --on-success-status resolved
@@ -312,6 +319,7 @@ tapd agent fix-bugs \
 
 默认要求工作区干净；如果 `git status --porcelain` 有输出，命令会跳过自动修复并写 TAPD 评论。
 命令不会自动 commit、push、创建 MR、部署或合并。
+可用 `--mr-remote` 指定 Git remote，默认 `origin`；可用 `--mr-branch-prefix` 指定本地分支名前缀，默认 `tapd-agent/mr-`。
 
 ## 全局标志
 
