@@ -121,7 +121,7 @@ func TestReadAgentFixBugsSSEOnce(t *testing.T) {
 	resetAgentFixBugsTestState()
 	watchStateRef = &watchState{}
 
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}}
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		switch cfg.Command {
 		case "git status --porcelain":
@@ -148,7 +148,7 @@ func TestHandleAgentFixBugsEventDoesNotAdvanceStateOnFailure(t *testing.T) {
 	resetAgentFixBugsTestState()
 	watchStateRef = &watchState{}
 
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}}
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		if cfg.Command == "git status --porcelain" {
 			return commandRunResult{Stdout: " M file.go\n"}
@@ -171,13 +171,38 @@ func TestHandleAgentFixBugsEventDoesNotAdvanceStateOnFailure(t *testing.T) {
 	}
 }
 
+func TestHandleAgentFixBugsEventAdvancesStateOnSkipped(t *testing.T) {
+	t.Cleanup(resetAgentFixBugsTestState)
+	resetAgentFixBugsTestState()
+	watchStateRef = &watchState{}
+
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "", CurrentOwner: "agent"}}
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		t.Fatalf("git/agent/test should not run when event is skipped: %q", cfg.Command)
+		return commandRunResult{}
+	})
+	worker := &bugFixWorker{tapd: tapd, runner: runner, repo: "/repo", agentCmd: "agent", currentUser: "agent", outputLimit: 1024}
+	data := `{"id":7,"received_at":1,"event":{"event":"bug::create","workspace_id":"123","bug":{"id":"456"}}}`
+
+	handled, err := handleAgentFixBugsEvent(context.Background(), data, agentFixBugsConfig{}, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handled {
+		t.Fatal("expected event to be handled")
+	}
+	if watchStateRef.LastSeen() != 7 {
+		t.Fatalf("lastSeen=%d, want 7 after skipped handling", watchStateRef.LastSeen())
+	}
+}
+
 func TestHandleAgentFixBugsEventFailureBlocksLaterSuccessWatermark(t *testing.T) {
 	t.Cleanup(resetAgentFixBugsTestState)
 	resetAgentFixBugsTestState()
 	watchStateRef = &watchState{}
 
 	dirty := true
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}}
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		switch cfg.Command {
 		case "git status --porcelain":

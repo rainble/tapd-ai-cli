@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/studyzy/tapd-sdk-go/model"
@@ -66,6 +67,9 @@ func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) 
 	bug, err := w.tapd.GetBugDetail(ctx, target.WorkspaceID, target.BugID)
 	if err != nil {
 		return w.fail(ctx, result, "bug_show", err.Error(), limit)
+	}
+	if skipped, stage, detail := w.shouldSkipBug(bug); skipped {
+		return w.skip(result, stage, detail, limit)
 	}
 
 	if !w.allowDirty {
@@ -142,6 +146,32 @@ func (w *bugFixWorker) handleTarget(ctx context.Context, target bugEventTarget) 
 	return result
 }
 
+func (w *bugFixWorker) shouldSkipBug(bug bugFixBugDetail) (bool, string, string) {
+	if strings.TrimSpace(bug.Description) == "" {
+		return true, "empty_content", "bug description is empty"
+	}
+	user := strings.TrimSpace(w.currentUser)
+	if user != "" && !ownerContainsUser(bug.CurrentOwner, user) {
+		return true, "owner_mismatch", fmt.Sprintf("bug current_owner %q does not contain current user %q", bug.CurrentOwner, user)
+	}
+	return false, "", ""
+}
+
+func ownerContainsUser(currentOwner, currentUser string) bool {
+	currentUser = strings.TrimSpace(currentUser)
+	if currentUser == "" {
+		return true
+	}
+	for _, owner := range strings.FieldsFunc(currentOwner, func(r rune) bool {
+		return r == ';' || r == ',' || r == '，' || r == '、' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	}) {
+		if strings.TrimSpace(owner) == currentUser {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *bugFixWorker) fail(ctx context.Context, base bugFixResult, stage, detail string, limit int) bugFixResult {
 	comment := buildFailureComment(stage, detail)
 	_ = w.tapd.AddBugComment(ctx, base.WorkspaceID, base.BugID, comment)
@@ -149,6 +179,13 @@ func (w *bugFixWorker) fail(ctx context.Context, base bugFixResult, stage, detai
 		return w.failNoComment(base, "status_update", statusUpdateFailureDetail(w.onFailureStatus, err, stage, detail), limit)
 	}
 	return w.failNoComment(base, stage, detail, limit)
+}
+
+func (w *bugFixWorker) skip(base bugFixResult, stage, detail string, limit int) bugFixResult {
+	base.Status = "skipped"
+	base.Stage = stage
+	base.Detail = truncateOutput(detail, limit)
+	return base
 }
 
 func (w *bugFixWorker) updateFailureStatus(ctx context.Context, base bugFixResult) error {
@@ -255,6 +292,7 @@ func (sdkBugFixTapdClient) GetStoryDetail(ctx context.Context, workspaceID, stor
 	mapped := bugFixStoryDetail{
 		WorkspaceID: workspaceID,
 		ID:          story.ID,
+		ParentID:    story.ParentID,
 		Title:       story.Name,
 		Description: htmlToMarkdown(story.Description),
 	}

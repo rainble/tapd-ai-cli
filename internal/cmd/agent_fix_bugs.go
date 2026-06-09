@@ -144,6 +144,10 @@ func runAgentFixBugs(cmd *cobra.Command, args []string) error {
 		os.Exit(output.ExitParamError)
 		return nil
 	}
+	currentUser := cfg.currentUser
+	if currentUser == "" {
+		currentUser = ensureNick()
+	}
 	worker := &bugFixWorker{
 		tapd:            sdkBugFixTapdClient{},
 		runner:          shellCommandRunner{},
@@ -153,7 +157,7 @@ func runAgentFixBugs(cmd *cobra.Command, args []string) error {
 		onStartStatus:   cfg.onStartStatus,
 		onSuccessStatus: cfg.onSuccessStatus,
 		onFailureStatus: cfg.onFailureStatus,
-		currentUser:     cfg.currentUser,
+		currentUser:     currentUser,
 		resolution:      cfg.resolution,
 		allowDirty:      cfg.allowDirty,
 		outputLimit:     cfg.outputLimit,
@@ -282,7 +286,7 @@ func handleAgentFixBugsEvent(ctx context.Context, data string, cfg agentFixBugsC
 	}
 	res := worker.handleTarget(ctx, target)
 	_ = output.PrintJSON(os.Stdout, res, true)
-	if res.Status == "success" {
+	if res.Status == "success" || res.Status == "skipped" {
 		advanceAgentFixBugsWatermark(ev.ID)
 	} else {
 		blockAgentFixBugsWatermark(ev.ID)

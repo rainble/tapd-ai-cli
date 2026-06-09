@@ -290,7 +290,8 @@ glob 用 `*` / `?` / `[abc]` 通配，逗号要转义时写 `\,`。
 验证，然后给 bug 写评论。只有配置了 `--on-success-status` 时才会自动流转状态。
 
 如果希望自动对应到 TAPD 绑定的 GitLab MR，可开启 `--branch-strategy linked-mr`。
-该模式会优先读取 bug 关联需求里的 MR 链接，其次读取 bug 自身描述/评论里的 MR 链接，然后在本地执行
+该模式会优先读取 bug 关联需求里的 MR 链接；如果关联需求没有 MR，会继续检查父需求；
+最后才读取 bug 自身描述/评论里的 MR 链接。找到 MR 后在本地执行
 `git fetch <remote> merge-requests/<iid>/head` 并 checkout 到 `tapd-agent/mr-<iid>`。
 默认仍不会自动 commit、push、创建 MR、部署或合并。
 
@@ -320,6 +321,7 @@ tapd agent fix-bugs \
 默认要求工作区干净；如果 `git status --porcelain` 有输出，命令会跳过自动修复并写 TAPD 评论。
 命令不会自动 commit、push、创建 MR、部署或合并。
 可用 `--mr-remote` 指定 Git remote，默认 `origin`；可用 `--mr-branch-prefix` 指定本地分支名前缀，默认 `tapd-agent/mr-`。
+如果 bug 描述为空，或 bug 当前处理人不包含当前登录用户，命令会直接跳过该事件，不会切分支、运行 agent 或流转状态。
 
 ## 全局标志
 

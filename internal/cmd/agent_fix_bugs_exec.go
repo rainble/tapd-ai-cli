@@ -159,6 +159,7 @@ type bugFixBugDetail struct {
 type bugFixStoryDetail struct {
 	WorkspaceID string
 	ID          string
+	ParentID    string
 	Title       string
 	Description string
 	Comments    []bugFixComment

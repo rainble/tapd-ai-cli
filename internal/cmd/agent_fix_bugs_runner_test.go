@@ -107,6 +107,54 @@ func TestBugFixWorkerHandleSuccess(t *testing.T) {
 	}
 }
 
+func TestBugFixWorkerSkipsEmptyDescription(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "   ", CurrentOwner: "agent"}}
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		t.Fatalf("git/agent/test should not run when bug description is empty: %q", cfg.Command)
+		return commandRunResult{}
+	})
+	worker := bugFixWorker{
+		tapd:        tapd,
+		runner:      runner,
+		repo:        "/repo",
+		agentCmd:    "agent",
+		testCmd:     "go test ./...",
+		currentUser: "agent",
+		outputLimit: 1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "skipped" || res.Stage != "empty_content" {
+		t.Fatalf("result=%+v", res)
+	}
+	if len(tapd.comments) != 0 || len(tapd.updates) != 0 {
+		t.Fatalf("comments=%v updates=%+v", tapd.comments, tapd.updates)
+	}
+}
+
+func TestBugFixWorkerSkipsOwnerMismatch(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "nil pointer", CurrentOwner: "bob;carol"}}
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		t.Fatalf("git/agent/test should not run when current user is not owner: %q", cfg.Command)
+		return commandRunResult{}
+	})
+	worker := bugFixWorker{
+		tapd:        tapd,
+		runner:      runner,
+		repo:        "/repo",
+		agentCmd:    "agent",
+		testCmd:     "go test ./...",
+		currentUser: "alice",
+		outputLimit: 1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "skipped" || res.Stage != "owner_mismatch" {
+		t.Fatalf("result=%+v", res)
+	}
+	if len(tapd.comments) != 0 || len(tapd.updates) != 0 {
+		t.Fatalf("comments=%v updates=%+v", tapd.comments, tapd.updates)
+	}
+}
+
 func TestBugFixWorkerLinkedMRUsesStoryMRBeforeBugMR(t *testing.T) {
 	tapd := &fakeBugFixTapd{
 		bug: bugFixBugDetail{
@@ -175,8 +223,73 @@ func TestBugFixWorkerLinkedMRUsesStoryMRBeforeBugMR(t *testing.T) {
 	}
 }
 
+func TestBugFixWorkerLinkedMRFallsBackToParentStoryBeforeBugMR(t *testing.T) {
+	tapd := &fakeBugFixTapd{
+		bug: bugFixBugDetail{
+			Title:       "panic",
+			Description: "bug MR http://git.example.com/team/repo/-/merge_requests/13",
+			StoryID:     "story-child",
+		},
+		stories: map[string]bugFixStoryDetail{
+			"story-child": {
+				Title:       "child story",
+				Description: "no MR here",
+				ParentID:    "story-parent",
+			},
+			"story-parent": {
+				Title: "parent story",
+				Comments: []bugFixComment{{
+					Description: "parent MR http://git.example.com/team/repo/-/merge_requests/77",
+				}},
+			},
+		},
+	}
+	var commands []string
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		commands = append(commands, cfg.Command)
+		switch cfg.Command {
+		case "git status --porcelain":
+			return commandRunResult{}
+		case "git fetch origin merge-requests/77/head":
+			return commandRunResult{Stdout: "fetched"}
+		case "git checkout -B tapd-agent/mr-77 FETCH_HEAD":
+			return commandRunResult{Stdout: "checked out"}
+		case "agent":
+			return commandRunResult{Stdout: "changed"}
+		case "go test ./...":
+			return commandRunResult{Stdout: "ok"}
+		default:
+			t.Fatalf("unexpected command %q", cfg.Command)
+			return commandRunResult{}
+		}
+	})
+	worker := bugFixWorker{
+		tapd:           tapd,
+		runner:         runner,
+		repo:           "/repo",
+		agentCmd:       "agent",
+		testCmd:        "go test ./...",
+		branchStrategy: "linked-mr",
+		mrRemote:       "origin",
+		mrBranchPrefix: "tapd-agent/mr-",
+		outputLimit:    1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "success" || !res.Verified {
+		t.Fatalf("result=%+v", res)
+	}
+	if len(tapd.comments) != 1 || !strings.Contains(tapd.comments[0], "story:story-parent") {
+		t.Fatalf("comments=%v", tapd.comments)
+	}
+	for _, got := range commands {
+		if strings.Contains(got, "merge-requests/13/head") {
+			t.Fatalf("used bug MR instead of parent story MR: commands=%v", commands)
+		}
+	}
+}
+
 func TestBugFixWorkerLinkedMRFailsWhenNoMRFound(t *testing.T) {
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", StoryID: "story-1"}, stories: map[string]bugFixStoryDetail{
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps", StoryID: "story-1"}, stories: map[string]bugFixStoryDetail{
 		"story-1": {Title: "story without mr"},
 	}}
 	var commands []string
@@ -212,7 +325,7 @@ func TestBugFixWorkerLinkedMRFailsWhenNoMRFound(t *testing.T) {
 }
 
 func TestBugFixWorkerSkipsDirtyRepo(t *testing.T) {
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}}
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		if cfg.Command == "git status --porcelain" {
 			return commandRunResult{Stdout: " M file.go\n"}
@@ -238,7 +351,7 @@ func TestBugFixWorkerSkipsDirtyRepo(t *testing.T) {
 }
 
 func TestBugFixWorkerTestFailure(t *testing.T) {
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}}
 	var commands []string
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		commands = append(commands, cfg.Command)
@@ -282,7 +395,7 @@ func TestBugFixWorkerTestFailure(t *testing.T) {
 }
 
 func TestBugFixWorkerStartStatusFailureStopsBeforeAgent(t *testing.T) {
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}, failUpdateStatus: true}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}, failUpdateStatus: true}
 	var commands []string
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		commands = append(commands, cfg.Command)
@@ -314,7 +427,7 @@ func TestBugFixWorkerStartStatusFailureStopsBeforeAgent(t *testing.T) {
 }
 
 func TestBugFixWorkerFailureStatusFailurePreservesOriginalContext(t *testing.T) {
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}, failUpdateStatus: true}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}, failUpdateStatus: true}
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		if cfg.Command == "git status --porcelain" {
 			return commandRunResult{Stdout: " M file.go\n"}
@@ -343,7 +456,7 @@ func TestBugFixWorkerFailureStatusFailurePreservesOriginalContext(t *testing.T) 
 }
 
 func TestBugFixWorkerSuccessCommentFailureAttemptsFailureStatus(t *testing.T) {
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}, failComment: true}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}, failComment: true}
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		switch cfg.Command {
 		case "git status --porcelain":
@@ -376,7 +489,7 @@ func TestBugFixWorkerSuccessCommentFailureAttemptsFailureStatus(t *testing.T) {
 }
 
 func TestBugFixWorkerSuccessCommentAndFailureStatusFailureKeepsVerified(t *testing.T) {
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}, failComment: true, failUpdateStatus: true}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}, failComment: true, failUpdateStatus: true}
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		switch cfg.Command {
 		case "git status --porcelain":
@@ -411,7 +524,7 @@ func TestBugFixWorkerSuccessCommentAndFailureStatusFailureKeepsVerified(t *testi
 }
 
 func TestBugFixWorkerDefaultOutputLimitTruncatesFailureDetail(t *testing.T) {
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}}
 	longDirty := strings.Repeat("x", defaultCommandOutputLimit+32)
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		if cfg.Command == "git status --porcelain" {
@@ -440,7 +553,7 @@ func TestBugFixWorkerDefaultOutputLimitTruncatesFailureDetail(t *testing.T) {
 }
 
 func TestBugFixWorkerDirtyRepoUsesSmallOutputLimit(t *testing.T) {
-	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic"}}
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "steps"}}
 	longDirty := " M " + strings.Repeat("x", 80)
 	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
 		if cfg.Command != "git status --porcelain" {
@@ -493,7 +606,7 @@ func TestSDKBugFixTapdClientMapsBugAndComments(t *testing.T) {
 		case strings.Contains(path, "/comments"):
 			w.Write([]byte(`{"status":1,"data":[{"Comment":{"id":"c1","author":"bob","created":"2026-06-04","description":"<p>please check</p>"}}]}`))
 		case strings.Contains(path, "/stories"):
-			w.Write([]byte(`{"status":1,"data":[{"Story":{"id":"789","name":"Linked Story","description":"<p>Story Desc</p>","status":"open"}}]}`))
+			w.Write([]byte(`{"status":1,"data":[{"Story":{"id":"789","name":"Linked Story","description":"<p>Story Desc</p>","parent_id":"456-parent","status":"open"}}]}`))
 		case strings.Contains(path, "/bugs") && r.Method == http.MethodPost:
 			w.Write([]byte(`{"status":1,"data":{"Bug":{"id":"456","title":"Test Bug","url":"http://test/bug/456"}}}`))
 		default:
@@ -523,7 +636,7 @@ func TestSDKBugFixTapdClientMapsBugAndComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if story.ID != "789" || story.Title != "Linked Story" || len(story.Comments) != 1 {
+	if story.ID != "789" || story.Title != "Linked Story" || story.ParentID != "456-parent" || len(story.Comments) != 1 {
 		t.Fatalf("story detail=%+v", story)
 	}
 	if !strings.Contains(story.Comments[0].Description, "99") {

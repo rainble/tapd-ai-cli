@@ -36,13 +36,15 @@ type linkedMR struct {
 	Source string
 }
 
+const maxStoryParentDepth = 16
+
 func prepareLinkedMRBranch(ctx context.Context, tapd bugFixTapdClient, runner commandRunner, repo string, bug bugFixBugDetail, opts bugFixBranchOptions) (*bugFixBranchContext, error) {
 	mr, err := findLinkedMR(ctx, tapd, bug)
 	if err != nil {
 		return nil, err
 	}
 	if mr.IID == "" {
-		return nil, fmt.Errorf("no GitLab MR link found in TAPD story or bug")
+		return nil, fmt.Errorf("no GitLab MR link found in TAPD story, parent story, or bug")
 	}
 	if err := validateGitArg(opts.Remote, "MR remote"); err != nil {
 		return nil, err
@@ -78,16 +80,39 @@ func prepareLinkedMRBranch(ctx context.Context, tapd bugFixTapdClient, runner co
 
 func findLinkedMR(ctx context.Context, tapd bugFixTapdClient, bug bugFixBugDetail) (linkedMR, error) {
 	for _, storyID := range storyIDsForBug(bug) {
-		story, err := tapd.GetStoryDetail(ctx, bug.WorkspaceID, storyID)
+		mr, err := findMRInStoryParents(ctx, tapd, bug.WorkspaceID, storyID)
+		if err != nil {
+			return linkedMR{}, err
+		}
+		if mr.IID != "" {
+			return mr, nil
+		}
+	}
+	if mr := firstMRInTexts("bug:"+bug.ID, bug.Description, commentsText(bug.Comments)); mr.IID != "" {
+		return mr, nil
+	}
+	return linkedMR{}, nil
+}
+
+func findMRInStoryParents(ctx context.Context, tapd bugFixTapdClient, workspaceID, storyID string) (linkedMR, error) {
+	seen := map[string]bool{}
+	for depth := 0; storyID != ""; depth++ {
+		if depth >= maxStoryParentDepth {
+			return linkedMR{}, fmt.Errorf("linked TAPD story parent chain exceeded %d levels at %s", maxStoryParentDepth, storyID)
+		}
+		if seen[storyID] {
+			return linkedMR{}, fmt.Errorf("linked TAPD story parent chain has a cycle at %s", storyID)
+		}
+		seen[storyID] = true
+
+		story, err := tapd.GetStoryDetail(ctx, workspaceID, storyID)
 		if err != nil {
 			return linkedMR{}, fmt.Errorf("load linked TAPD story %s failed: %w", storyID, err)
 		}
 		if mr := firstMRInTexts("story:"+storyID, story.Description, commentsText(story.Comments)); mr.IID != "" {
 			return mr, nil
 		}
-	}
-	if mr := firstMRInTexts("bug:"+bug.ID, bug.Description, commentsText(bug.Comments)); mr.IID != "" {
-		return mr, nil
+		storyID = story.ParentID
 	}
 	return linkedMR{}, nil
 }
