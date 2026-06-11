@@ -286,11 +286,7 @@ func handleAgentFixBugsEvent(ctx context.Context, data string, cfg agentFixBugsC
 	}
 	res := worker.handleTarget(ctx, target)
 	_ = output.PrintJSON(os.Stdout, res, true)
-	if res.Status == "success" || res.Status == "skipped" {
-		advanceAgentFixBugsWatermark(ev.ID)
-	} else {
-		blockAgentFixBugsWatermark(ev.ID)
-	}
+	advanceAgentFixBugsWatermark(ev.ID)
 	return true, nil
 }
 

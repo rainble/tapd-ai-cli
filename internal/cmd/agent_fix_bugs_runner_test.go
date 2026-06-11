@@ -155,6 +155,58 @@ func TestBugFixWorkerSkipsOwnerMismatch(t *testing.T) {
 	}
 }
 
+func TestBugFixWorkerSkipsOwnerWhenCurrentUserUnknown(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{Title: "panic", Description: "nil pointer", CurrentOwner: "bob"}}
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		t.Fatalf("git/agent/test should not run when current user is unknown: %q", cfg.Command)
+		return commandRunResult{}
+	})
+	worker := bugFixWorker{
+		tapd:        tapd,
+		runner:      runner,
+		repo:        "/repo",
+		agentCmd:    "agent",
+		testCmd:     "go test ./...",
+		outputLimit: 1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "skipped" || res.Stage != "owner_unknown" {
+		t.Fatalf("result=%+v", res)
+	}
+	if len(tapd.comments) != 0 || len(tapd.updates) != 0 {
+		t.Fatalf("comments=%v updates=%+v", tapd.comments, tapd.updates)
+	}
+}
+
+func TestBugFixWorkerSkipsAlreadyProcessedBug(t *testing.T) {
+	tapd := &fakeBugFixTapd{bug: bugFixBugDetail{
+		Title:        "panic",
+		Description:  "nil pointer",
+		CurrentOwner: "agent",
+		Comments:     []bugFixComment{{Author: "agent", Description: "AI agent run completed.\n\nVerified: true"}},
+	}}
+	runner := commandRunnerFunc(func(ctx context.Context, cfg commandRunConfig) commandRunResult {
+		t.Fatalf("git/agent/test should not run for an already processed bug: %q", cfg.Command)
+		return commandRunResult{}
+	})
+	worker := bugFixWorker{
+		tapd:        tapd,
+		runner:      runner,
+		repo:        "/repo",
+		agentCmd:    "agent",
+		testCmd:     "go test ./...",
+		currentUser: "agent",
+		outputLimit: 1024,
+	}
+	res := worker.handleTarget(context.Background(), bugEventTarget{WorkspaceID: "123", BugID: "456", EventID: 9})
+	if res.Status != "skipped" || res.Stage != "already_processed" {
+		t.Fatalf("result=%+v", res)
+	}
+	if len(tapd.comments) != 0 || len(tapd.updates) != 0 {
+		t.Fatalf("comments=%v updates=%+v", tapd.comments, tapd.updates)
+	}
+}
+
 func TestBugFixWorkerLinkedMRUsesStoryMRBeforeBugMR(t *testing.T) {
 	tapd := &fakeBugFixTapd{
 		bug: bugFixBugDetail{

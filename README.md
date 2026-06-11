@@ -167,6 +167,8 @@ tapd
 ├── relation  bugs | create
 ├── skill     init
 ├── url       <tapd-url>
+├── assistant product draft-story | check-story <story> | review-ready <story>
+├── assistant project progress | blockers | report | status-suggest
 ├── watch     [--endpoint <url>] [--token <tok>] [--exec <cmd>] [--once]
 ├── agent     fix-bugs --repo <path> [--test-cmd <cmd>] [--on-success-status <status>]
 ├── mcp                                   # 以 stdio MCP server 模式运行
@@ -184,6 +186,48 @@ tapd skill init
 支持的工具：Claude Code、CodeBuddy、Cursor、Windsurf、Trae、Codex、Gemini CLI、Cline、Roo Code、Augment。
 
 命令会自动检测当前目录下已有的工具配置文件夹并默认选中，交互式确认后生成 SKILL.md。生成的命令参考部分从当前 CLI 版本的命令树动态生成，始终保持同步。
+
+## 产品提需助手（tapd assistant product）
+
+`tapd assistant product` 面向产品经理的提需流程，默认只读，不会自动创建需求、流转状态或预约评审。
+
+```bash
+# 从粗略想法生成结构化需求草稿
+tapd assistant product draft-story \
+  --input "希望支持主播付费视频自动续费签约数据看板"
+
+# 检查已有 TAPD 需求材料是否完整
+tapd assistant product check-story <story_id_or_url>
+
+# 判断需求是否达到评审条件
+tapd assistant product review-ready <story_id_or_url>
+
+# 显式写回 TAPD 评论
+tapd assistant product check-story <story_id_or_url> --comment
+```
+
+检查规则覆盖背景、目标、范围、验收标准、负责人等硬性材料，并对非范围、风险、依赖等给出建议。默认输出 Markdown；加 `--json` 输出机器可读结果。
+
+## 项目管理助手（tapd assistant project）
+
+`tapd assistant project` 面向项目经理的进度汇总、卡点识别和状态建议。默认只读，不会自动修改需求、任务、缺陷或迭代状态。
+
+```bash
+# 汇总迭代进度
+tapd assistant project progress --iteration-id <iteration_id>
+
+# 识别无负责人、超期、长时间未更新等卡点
+tapd assistant project blockers --iteration-id <iteration_id>
+
+# 生成日报或周报
+tapd assistant project report --iteration-id <iteration_id> --period daily
+tapd assistant project report --iteration-id <iteration_id> --period weekly
+
+# 给出状态流转建议，但不执行流转
+tapd assistant project status-suggest --iteration-id <iteration_id>
+```
+
+分析数据来自 TAPD stories、tasks、bugs。规则覆盖状态分布、完成进度、未关闭缺陷、超期事项、停滞事项、owner 跟进清单和状态流转前置检查。默认输出 Markdown；加 `--json` 输出机器可读结果。
 
 ## MCP 集成（tapd mcp）
 

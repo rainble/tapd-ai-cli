@@ -150,11 +150,27 @@ func (w *bugFixWorker) shouldSkipBug(bug bugFixBugDetail) (bool, string, string)
 	if strings.TrimSpace(bug.Description) == "" {
 		return true, "empty_content", "bug description is empty"
 	}
+	if bugHasAgentProcessedComment(bug.Comments) {
+		return true, "already_processed", "bug already has an AI agent result comment"
+	}
 	user := strings.TrimSpace(w.currentUser)
+	if user == "" && strings.TrimSpace(bug.CurrentOwner) != "" {
+		return true, "owner_unknown", fmt.Sprintf("bug current_owner is %q, but current user is unknown", bug.CurrentOwner)
+	}
 	if user != "" && !ownerContainsUser(bug.CurrentOwner, user) {
 		return true, "owner_mismatch", fmt.Sprintf("bug current_owner %q does not contain current user %q", bug.CurrentOwner, user)
 	}
 	return false, "", ""
+}
+
+func bugHasAgentProcessedComment(comments []bugFixComment) bool {
+	for _, comment := range comments {
+		if strings.Contains(comment.Description, "AI agent run completed.") ||
+			strings.Contains(comment.Description, "AI agent bug fix failed.") {
+			return true
+		}
+	}
+	return false
 }
 
 func ownerContainsUser(currentOwner, currentUser string) bool {

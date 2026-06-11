@@ -45,6 +45,15 @@ func resetFlags() {
 	flagJSON = false
 	flagPretty = false
 	flagNoComments = true // 默认不输出评论避免额外请求
+	flagAssistantProductInput = ""
+	flagAssistantProductFile = ""
+	flagAssistantProductComment = false
+	flagAssistantProjectIterationID = ""
+	flagAssistantProjectStaleDays = 7
+	flagAssistantProjectPeriod = "daily"
+	flagAssistantProjectSince = ""
+	flagAssistantProjectTargetStatus = ""
+	flagAssistantProjectLimit = 200
 
 	// testx 共享 flags
 	flagTxNamespace = ""

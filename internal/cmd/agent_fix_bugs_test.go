@@ -143,7 +143,7 @@ func TestReadAgentFixBugsSSEOnce(t *testing.T) {
 	}
 }
 
-func TestHandleAgentFixBugsEventDoesNotAdvanceStateOnFailure(t *testing.T) {
+func TestHandleAgentFixBugsEventAdvancesStateOnFailure(t *testing.T) {
 	t.Cleanup(resetAgentFixBugsTestState)
 	resetAgentFixBugsTestState()
 	watchStateRef = &watchState{}
@@ -166,8 +166,8 @@ func TestHandleAgentFixBugsEventDoesNotAdvanceStateOnFailure(t *testing.T) {
 	if !handled {
 		t.Fatal("expected event to be handled")
 	}
-	if watchStateRef.LastSeen() != 0 {
-		t.Fatalf("lastSeen=%d, want 0 after failed handling", watchStateRef.LastSeen())
+	if watchStateRef.LastSeen() != 7 {
+		t.Fatalf("lastSeen=%d, want 7 after failed handling", watchStateRef.LastSeen())
 	}
 }
 
@@ -196,7 +196,7 @@ func TestHandleAgentFixBugsEventAdvancesStateOnSkipped(t *testing.T) {
 	}
 }
 
-func TestHandleAgentFixBugsEventFailureBlocksLaterSuccessWatermark(t *testing.T) {
+func TestHandleAgentFixBugsEventFailureDoesNotBlockLaterSuccessWatermark(t *testing.T) {
 	t.Cleanup(resetAgentFixBugsTestState)
 	resetAgentFixBugsTestState()
 	watchStateRef = &watchState{}
@@ -221,23 +221,19 @@ func TestHandleAgentFixBugsEventFailureBlocksLaterSuccessWatermark(t *testing.T)
 
 	failedEvent := `{"id":7,"received_at":1,"event":{"event":"bug::create","workspace_id":"123","bug":{"id":"456"}}}`
 	laterEvent := `{"id":8,"received_at":1,"event":{"event":"bug::create","workspace_id":"123","bug":{"id":"789"}}}`
-	retryEvent := `{"id":7,"received_at":1,"event":{"event":"bug::create","workspace_id":"123","bug":{"id":"456"}}}`
 
 	if _, err := handleAgentFixBugsEvent(context.Background(), failedEvent, agentFixBugsConfig{}, worker); err != nil {
 		t.Fatal(err)
+	}
+	if watchStateRef.LastSeen() != 7 {
+		t.Fatalf("failed event lastSeen=%d want 7", watchStateRef.LastSeen())
 	}
 	dirty = false
 	if _, err := handleAgentFixBugsEvent(context.Background(), laterEvent, agentFixBugsConfig{}, worker); err != nil {
 		t.Fatal(err)
 	}
-	if watchStateRef.LastSeen() != 0 {
-		t.Fatalf("later success advanced blocked watermark to %d", watchStateRef.LastSeen())
-	}
-	if _, err := handleAgentFixBugsEvent(context.Background(), retryEvent, agentFixBugsConfig{}, worker); err != nil {
-		t.Fatal(err)
-	}
-	if watchStateRef.LastSeen() != 7 {
-		t.Fatalf("retry success lastSeen=%d want 7", watchStateRef.LastSeen())
+	if watchStateRef.LastSeen() != 8 {
+		t.Fatalf("later success lastSeen=%d want 8", watchStateRef.LastSeen())
 	}
 }
 
