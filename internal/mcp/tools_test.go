@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	tapd "github.com/studyzy/tapd-sdk-go"
+	"github.com/studyzy/tapd-sdk-go/model"
 )
 
 func TestToolStoryCreateConvertsMarkdownDescription(t *testing.T) {
@@ -132,6 +133,78 @@ func TestGitLabIssueCreateFromStoryToolUsesTAPDAndCommentsBack(t *testing.T) {
 	resp := result.(gitLabIssueToolResponse)
 	if resp.IID != 45 {
 		t.Fatalf("unexpected result: %+v", resp)
+	}
+}
+
+func TestBuildMCPGitLabStorySnapshot_RendersStructuredDescription(t *testing.T) {
+	story := &model.Story{
+		ID:          "1151081496001028684",
+		WorkspaceID: "51081496",
+		Name:        "重构登录",
+		Description: `<h2>背景</h2><p>当前登录链路耗时较长。</p><h2>目标</h2><p>缩短登录耗时。</p><h2>验收标准</h2><ul><li>P95 小于 300ms</li></ul><p>补充：需要灰度。</p>`,
+		Status:      "open",
+		Priority:    "High",
+		Owner:       "alice",
+		Developer:   "bob",
+		URL:         "https://tapd.example.com/story/1151081496001028684",
+	}
+	snapshot := buildMCPGitLabStorySnapshot(story)
+
+	for _, want := range []string{
+		"## TAPD 需求",
+		"## 背景 / 现状",
+		"当前登录链路耗时较长。",
+		"## 目标 / 预期",
+		"缩短登录耗时。",
+		"## 验收标准 / 测试要点",
+		"P95 小于 300ms",
+		"## 原始补充",
+		"补充：需要灰度。",
+	} {
+		if !strings.Contains(snapshot.Description, want) {
+			t.Fatalf("description missing %q:\n%s", want, snapshot.Description)
+		}
+	}
+	if strings.Contains(snapshot.Description, "## 描述") {
+		t.Fatalf("description should not paste raw TAPD body:\n%s", snapshot.Description)
+	}
+}
+
+func TestBuildMCPGitLabBugSnapshot_RendersStructuredDescription(t *testing.T) {
+	bug := &model.Bug{
+		ID:           "1151081496001028685",
+		WorkspaceID:  "51081496",
+		Title:        "支付失败",
+		Description:  `<p>前置条件：用户已登录。</p><p>复现步骤：点击支付按钮。</p><p>实际结果：返回 500。</p><p>期望结果：支付成功。</p><p>日志：trace_id=abc。</p><p>影响范围：全部 Android 用户。</p>`,
+		Status:       "open",
+		Priority:     "High",
+		Severity:     "critical",
+		CurrentOwner: "alice",
+		URL:          "https://tapd.example.com/bug/1151081496001028685",
+	}
+	snapshot := buildMCPGitLabBugSnapshot(bug)
+
+	for _, want := range []string{
+		"## TAPD 缺陷",
+		"## 复现条件",
+		"用户已登录。",
+		"## 复现步骤",
+		"点击支付按钮。",
+		"## 实际结果",
+		"返回 500。",
+		"## 预期结果",
+		"支付成功。",
+		"## 影响范围",
+		"全部 Android 用户。",
+		"## 排查线索",
+		"trace\\_id=abc。",
+	} {
+		if !strings.Contains(snapshot.Description, want) {
+			t.Fatalf("description missing %q:\n%s", want, snapshot.Description)
+		}
+	}
+	if strings.Contains(snapshot.Description, "## 描述") {
+		t.Fatalf("description should not paste raw TAPD body:\n%s", snapshot.Description)
 	}
 }
 

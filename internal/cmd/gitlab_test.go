@@ -133,18 +133,17 @@ func TestIsGitLabStandaloneCreate(t *testing.T) {
 	}
 }
 
-func TestBuildGitLabIssueFromStory_RendersTAPDSnapshot(t *testing.T) {
+func TestBuildGitLabIssueFromStory_RendersStructuredDescription(t *testing.T) {
 	story := &model.Story{
-		ID:                  "1151081496001028684",
-		Name:                "支持自动续费看板",
-		Description:         "<p>展示签约趋势</p>",
-		URL:                 "https://tapd.example.com/story",
-		Status:              "planning",
-		PriorityLabel:       "High",
-		Owner:               "alice",
-		Developer:           "bob",
-		IterationID:         "it1",
-		MarkdownDescription: "",
+		ID:            "1151081496001028684",
+		Name:          "支持自动续费看板",
+		Description:   "<h2>背景</h2><p>运营需要展示签约趋势。</p><h2>目标</h2><p>让 PM 快速判断续费表现。</p><h2>方案</h2><p>新增趋势图和明细表。</p><h2>验收标准</h2><p>能按日期筛选并导出。</p><h2>风险</h2><p>依赖数据仓库产出。</p><p>补充说明：历史数据只保留 180 天。</p>",
+		URL:           "https://tapd.example.com/story",
+		Status:        "planning",
+		PriorityLabel: "High",
+		Owner:         "alice",
+		Developer:     "bob",
+		IterationID:   "it1",
 	}
 
 	snapshot := buildGitLabIssueFromStory(story)
@@ -156,17 +155,31 @@ func TestBuildGitLabIssueFromStory_RendersTAPDSnapshot(t *testing.T) {
 		t.Fatalf("title = %q", snapshot.Title)
 	}
 	for _, want := range []string{
-		"TAPD 需求",
-		"1151081496001028684",
-		"https://tapd.example.com/story",
-		"High",
-		"alice",
-		"bob",
-		"展示签约趋势",
+		"## TAPD 需求",
+		"- TAPD: https://tapd.example.com/story",
+		"- ID: 1151081496001028684",
+		"- Priority: High",
+		"- Owner: alice",
+		"- Developer: bob",
+		"## 背景 / 现状",
+		"运营需要展示签约趋势。",
+		"## 目标 / 预期",
+		"让 PM 快速判断续费表现。",
+		"## 需求范围 / 方案",
+		"新增趋势图和明细表。",
+		"## 验收标准 / 测试要点",
+		"能按日期筛选并导出。",
+		"## 风险 / 依赖 / 待确认",
+		"依赖数据仓库产出。",
+		"## 原始补充",
+		"补充说明：历史数据只保留 180 天。",
 	} {
 		if !strings.Contains(snapshot.Description, want) {
 			t.Fatalf("description should contain %q, got:\n%s", want, snapshot.Description)
 		}
+	}
+	if strings.Contains(snapshot.Description, "## 描述") {
+		t.Fatalf("description should not use raw description section, got:\n%s", snapshot.Description)
 	}
 	if !snapshot.Ready {
 		t.Fatal("story with title and description should be ready")
@@ -176,11 +189,36 @@ func TestBuildGitLabIssueFromStory_RendersTAPDSnapshot(t *testing.T) {
 	}
 }
 
-func TestBuildGitLabIssueFromBug_RendersTAPDSnapshot(t *testing.T) {
+func TestBuildGitLabIssueFromStory_PutsUnclassifiedContentInOriginalSupplement(t *testing.T) {
+	story := &model.Story{
+		ID:          "1151081496001028684",
+		Name:        "无模板需求",
+		Description: "<p>这是一段没有模板标题的自由描述。</p>",
+	}
+
+	snapshot := buildGitLabIssueFromStory(story)
+
+	for _, want := range []string{
+		"## TAPD 需求",
+		"## 原始补充",
+		"这是一段没有模板标题的自由描述。",
+	} {
+		if !strings.Contains(snapshot.Description, want) {
+			t.Fatalf("description should contain %q, got:\n%s", want, snapshot.Description)
+		}
+	}
+	for _, notWant := range []string{"## 背景 / 现状", "## 目标 / 预期", "## 需求范围 / 方案"} {
+		if strings.Contains(snapshot.Description, notWant) {
+			t.Fatalf("description should not contain empty section %q, got:\n%s", notWant, snapshot.Description)
+		}
+	}
+}
+
+func TestBuildGitLabIssueFromBug_RendersStructuredDescription(t *testing.T) {
 	bug := &model.Bug{
 		ID:            "1151081496002000001",
 		Title:         "保存时报错",
-		Description:   "<p>点击保存后 500</p>",
+		Description:   "<div>前置条件：测试账号 mid=123，iOS 8.0.0</div><div>复现流程：进入编辑页后点击保存</div><div>实际情况：接口返回 500</div><div>预期情况：保存成功并返回详情页</div><div>影响范围：所有开通充电的 UP 主</div><div>日志 trace_id=abc</div>",
 		URL:           "https://tapd.example.com/bug",
 		Status:        "new",
 		PriorityLabel: "urgent",
@@ -198,13 +236,59 @@ func TestBuildGitLabIssueFromBug_RendersTAPDSnapshot(t *testing.T) {
 	if snapshot.Title != "[TAPD Bug] 保存时报错" {
 		t.Fatalf("title = %q", snapshot.Title)
 	}
-	for _, want := range []string{"TAPD 缺陷", "serious", "charlie", "charge", "点击保存后 500"} {
+	for _, want := range []string{
+		"## TAPD 缺陷",
+		"- TAPD: https://tapd.example.com/bug",
+		"- Severity: serious",
+		"- Current owner: charlie",
+		"- Module: charge",
+		"## 复现条件",
+		"测试账号 mid=123",
+		"## 复现步骤",
+		"进入编辑页后点击保存",
+		"## 实际结果",
+		"接口返回 500",
+		"## 预期结果",
+		"保存成功并返回详情页",
+		"## 影响范围",
+		"所有开通充电的 UP 主",
+		"## 排查线索",
+		"trace\\_id=abc",
+	} {
 		if !strings.Contains(snapshot.Description, want) {
 			t.Fatalf("description should contain %q, got:\n%s", want, snapshot.Description)
 		}
 	}
+	if strings.Contains(snapshot.Description, "## 描述") {
+		t.Fatalf("description should not use raw description section, got:\n%s", snapshot.Description)
+	}
 	if !snapshot.Ready || snapshot.Fingerprint == "" {
 		t.Fatalf("bug should be ready with fingerprint: %+v", snapshot)
+	}
+}
+
+func TestBuildGitLabIssueFromBug_PutsUnclassifiedContentInOriginalSupplement(t *testing.T) {
+	bug := &model.Bug{
+		ID:          "1151081496002000001",
+		Title:       "无模板缺陷",
+		Description: "<p>用户反馈页面偶现空白，暂无更多信息。</p>",
+	}
+
+	snapshot := buildGitLabIssueFromBug(bug)
+
+	for _, want := range []string{
+		"## TAPD 缺陷",
+		"## 原始补充",
+		"用户反馈页面偶现空白，暂无更多信息。",
+	} {
+		if !strings.Contains(snapshot.Description, want) {
+			t.Fatalf("description should contain %q, got:\n%s", want, snapshot.Description)
+		}
+	}
+	for _, notWant := range []string{"## 复现条件", "## 复现步骤", "## 实际结果"} {
+		if strings.Contains(snapshot.Description, notWant) {
+			t.Fatalf("description should not contain empty section %q, got:\n%s", notWant, snapshot.Description)
+		}
 	}
 }
 

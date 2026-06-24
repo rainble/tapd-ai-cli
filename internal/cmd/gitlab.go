@@ -307,7 +307,7 @@ func printGitLabIssueSuccess(issue *gitlab.Issue, project string) error {
 func buildGitLabIssueFromStory(story *model.Story) gitLabIssueSnapshot {
 	md := normalizedTAPDMarkdown(firstNonEmpty(story.MarkdownDescription, story.Description))
 	title := strings.TrimSpace(story.Name)
-	description := renderTAPDSnapshot("TAPD 需求", story.URL, []string{
+	description := renderTAPDSnapshot("story", "TAPD 需求", story.URL, []string{
 		"ID: " + story.ID,
 		"Status: " + story.Status,
 		"Priority: " + firstNonEmpty(story.PriorityLabel, story.Priority),
@@ -331,7 +331,7 @@ func buildGitLabIssueFromStory(story *model.Story) gitLabIssueSnapshot {
 func buildGitLabIssueFromBug(bug *model.Bug) gitLabIssueSnapshot {
 	md := normalizedTAPDMarkdown(bug.Description)
 	title := strings.TrimSpace(bug.Title)
-	description := renderTAPDSnapshot("TAPD 缺陷", bug.URL, []string{
+	description := renderTAPDSnapshot("bug", "TAPD 缺陷", bug.URL, []string{
 		"ID: " + bug.ID,
 		"Status: " + bug.Status,
 		"Priority: " + firstNonEmpty(bug.PriorityLabel, bug.Priority),
@@ -359,7 +359,7 @@ func normalizedTAPDMarkdown(raw string) string {
 	return strings.TrimSpace(md)
 }
 
-func renderTAPDSnapshot(kind, tapdURL string, fields []string, md string) string {
+func renderTAPDSnapshot(entityType, kind, tapdURL string, fields []string, md string) string {
 	var b strings.Builder
 	b.WriteString("## ")
 	b.WriteString(kind)
@@ -370,16 +370,235 @@ func renderTAPDSnapshot(kind, tapdURL string, fields []string, md string) string
 		b.WriteString("\n")
 	}
 	for _, field := range fields {
-		if strings.TrimSpace(strings.TrimSuffix(field, ": ")) == "" {
+		// 字段格式 "Label: value":拆冒号后判断 value 是否为空,空则跳过整行。
+		idx := strings.Index(field, ":")
+		if idx >= 0 && strings.TrimSpace(field[idx+1:]) == "" {
 			continue
 		}
 		b.WriteString("- ")
 		b.WriteString(field)
 		b.WriteString("\n")
 	}
-	b.WriteString("\n## 描述\n\n")
-	b.WriteString(md)
+	structured := renderStructuredTAPDDescription(entityType, md)
+	if structured != "" {
+		b.WriteString("\n")
+		b.WriteString(structured)
+	}
 	return b.String()
+}
+
+type structuredSection struct {
+	key      string
+	title    string
+	keywords []string
+}
+
+func renderStructuredTAPDDescription(entityType string, md string) string {
+	sections := structuredSectionsFor(entityType)
+	if len(sections) == 0 {
+		sections = structuredSectionsFor("story")
+	}
+	grouped := make(map[string][]string, len(sections))
+	paragraphs := splitTAPDParagraphs(md)
+	for _, paragraph := range paragraphs {
+		key := classifyTAPDParagraph(entityType, paragraph)
+		if key == "" {
+			key = "original"
+			grouped[key] = append(grouped[key], paragraph)
+			continue
+		}
+		grouped[key] = append(grouped[key], trimTAPDParagraphLabel(paragraph))
+	}
+
+	var b strings.Builder
+	for _, section := range sections {
+		items := grouped[section.key]
+		if len(items) == 0 {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("## ")
+		b.WriteString(section.title)
+		b.WriteString("\n\n")
+		b.WriteString(strings.Join(items, "\n\n"))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func structuredSectionsFor(entityType string) []structuredSection {
+	switch entityType {
+	case "bug":
+		return []structuredSection{
+			{key: "summary", title: "问题概述", keywords: []string{"问题", "标题", "现象", "概述"}},
+			{key: "condition", title: "复现条件", keywords: []string{"前置条件", "环境", "版本", "账号", "数据", "机型"}},
+			{key: "steps", title: "复现步骤", keywords: []string{"复现", "步骤", "流程", "操作"}},
+			{key: "expected", title: "预期结果", keywords: []string{"预期", "应该", "期望"}},
+			{key: "actual", title: "实际结果", keywords: []string{"实际", "现状", "结果", "报错"}},
+			{key: "impact", title: "影响范围", keywords: []string{"影响", "范围", "严重性", "频率", "用户"}},
+			{key: "clue", title: "排查线索", keywords: []string{"日志", "接口", "curl", "trace", "截图", "线索", "分析"}},
+			{key: "original", title: "原始补充"},
+		}
+	default:
+		return []structuredSection{
+			{key: "background", title: "背景 / 现状", keywords: []string{"背景", "现状", "问题", "为什么", "痛点", "诉求", "上下文"}},
+			{key: "goal", title: "目标 / 预期", keywords: []string{"目标", "预期", "收益", "价值", "指标", "成功标准"}},
+			{key: "scope", title: "需求范围 / 方案", keywords: []string{"范围", "方案", "怎么做", "功能", "流程", "交互", "规则", "逻辑"}},
+			{key: "acceptance", title: "验收标准 / 测试要点", keywords: []string{"验收", "测试", "验证", "case", "用例", "准入", "完成标准"}},
+			{key: "risk", title: "风险 / 依赖 / 待确认", keywords: []string{"风险", "依赖", "待确认", "限制", "注意事项"}},
+			{key: "original", title: "原始补充"},
+		}
+	}
+}
+
+func classifyTAPDParagraph(entityType string, paragraph string) string {
+	head := paragraphClassifyText(paragraph)
+	if head == "" {
+		return ""
+	}
+	for _, section := range structuredSectionsFor(entityType) {
+		if section.key == "original" {
+			continue
+		}
+		for _, keyword := range section.keywords {
+			if strings.Contains(head, strings.ToLower(keyword)) {
+				return section.key
+			}
+		}
+	}
+	return ""
+}
+
+func paragraphClassifyText(paragraph string) string {
+	paragraph = strings.TrimSpace(paragraph)
+	isHeading := strings.HasPrefix(paragraph, "#")
+	paragraph = strings.TrimLeft(paragraph, "#-*> \t")
+	if idx := strings.IndexAny(paragraph, "：:\n"); idx >= 0 {
+		paragraph = paragraph[:idx]
+	} else if !isHeading {
+		lower := strings.ToLower(paragraph)
+		for _, prefix := range []string{"日志", "trace", "curl", "截图", "接口"} {
+			if strings.HasPrefix(lower, strings.ToLower(prefix)) {
+				return lower
+			}
+		}
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(paragraph))
+}
+
+func splitTAPDParagraphs(md string) []string {
+	md = strings.TrimSpace(md)
+	if md == "" {
+		return nil
+	}
+	lines := strings.Split(md, "\n")
+	var paragraphs []string
+	var current strings.Builder
+	flush := func() {
+		text := strings.TrimSpace(current.String())
+		if text != "" {
+			paragraphs = append(paragraphs, text)
+		}
+		current.Reset()
+	}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if currentContainsOnlyHeading(current.String()) {
+				continue
+			}
+			flush()
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			flush()
+			current.WriteString(trimmed)
+			current.WriteString("\n")
+			continue
+		}
+		if looksLikeTAPDLabel(trimmed) {
+			flush()
+		}
+		if current.Len() > 0 {
+			current.WriteString("\n")
+		}
+		current.WriteString(trimmed)
+	}
+	flush()
+	return paragraphs
+}
+
+func currentContainsOnlyHeading(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, "#") && !strings.Contains(text, "\n")
+}
+
+func looksLikeTAPDLabel(line string) bool {
+	line = strings.TrimLeft(line, "-*> \t")
+	idx := strings.IndexAny(line, "：:")
+	if idx <= 0 || idx > 24 {
+		return false
+	}
+	prefix := strings.TrimSpace(line[:idx])
+	if prefix == "" {
+		return false
+	}
+	for _, section := range structuredSectionsFor("story") {
+		for _, keyword := range section.keywords {
+			if strings.Contains(prefix, keyword) {
+				return true
+			}
+		}
+	}
+	for _, section := range structuredSectionsFor("bug") {
+		for _, keyword := range section.keywords {
+			if strings.Contains(prefix, keyword) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func trimTAPDParagraphLabel(paragraph string) string {
+	paragraph = strings.TrimSpace(paragraph)
+	lines := strings.SplitN(paragraph, "\n", 2)
+	first := strings.TrimSpace(lines[0])
+	if strings.HasPrefix(first, "#") {
+		first = strings.TrimSpace(strings.TrimLeft(first, "# "))
+		if len(lines) == 1 {
+			return first
+		}
+		rest := strings.TrimSpace(lines[1])
+		if rest == "" {
+			return first
+		}
+		return rest
+	}
+	cleaned := strings.TrimLeft(first, "-*> \t")
+	if key, value, ok := splitTAPDLabel(cleaned); ok && len([]rune(key)) <= 24 {
+		if value != "" {
+			if len(lines) == 1 {
+				return value
+			}
+			return strings.TrimSpace(value + "\n" + lines[1])
+		}
+	}
+	return paragraph
+}
+
+func splitTAPDLabel(text string) (string, string, bool) {
+	for idx, r := range text {
+		if r != '：' && r != ':' {
+			continue
+		}
+		key := strings.TrimSpace(text[:idx])
+		value := strings.TrimSpace(text[idx+len(string(r)):])
+		return key, value, key != ""
+	}
+	return "", "", false
 }
 
 func isGitLabSnapshotReady(title, markdownDescription string) bool {

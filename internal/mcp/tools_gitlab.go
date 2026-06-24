@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/studyzy/tapd-ai-cli/internal/config"
@@ -30,6 +31,7 @@ type gitLabIssueToolResponse struct {
 	URL       string `json:"url"`
 	Project   string `json:"project"`
 	ProjectID int    `json:"project_id,omitempty"`
+	Warning   string `json:"warning,omitempty"`
 }
 
 type gitLabToolSnapshot struct {
@@ -208,6 +210,7 @@ func createGitLabIssueFromMCP(ctx context.Context, s *Server, args map[string]in
 	if err != nil {
 		return nil, err
 	}
+	resp := gitLabToolResponse(issue, opts.Project)
 	if optBool(args, "comment_back") {
 		marker := gitLabToolSyncMarker{
 			Type:        snapshot.EntityType,
@@ -216,19 +219,21 @@ func createGitLabIssueFromMCP(ctx context.Context, s *Server, args map[string]in
 			IssueIID:    issue.IID,
 			Fingerprint: snapshot.Fingerprint,
 		}
+		// comment_back 失败不能让整个工具调用失败:GitLab issue 已经创建,
+		// 必须把 IID/URL 透传给调用方,否则 LLM 看不到结果会重试导致重复创建。
 		if err := addMCPGitLabSyncComment(ctx, s, snapshot, issue.WebURL, marker); err != nil {
-			return gitLabToolResponse(issue, opts.Project), fmt.Errorf("comment_back_failed: %w", err)
+			resp.Warning = "comment_back_failed: " + err.Error()
 		}
 	}
-	return gitLabToolResponse(issue, opts.Project), nil
+	return resp, nil
 }
 
 func resolveGitLabToolOptions(args map[string]interface{}) (gitLabToolOptions, error) {
-	cfg, _ := config.LoadConfig()
+	cfg, cfgErr := config.LoadConfig()
 	opts := gitLabToolOptions{
-		BaseURL: optString(args, "gitlab_base_url"),
-		Token:   optString(args, "gitlab_token"),
-		Project: optString(args, "project"),
+		BaseURL: strings.TrimSpace(optString(args, "gitlab_base_url")),
+		Token:   strings.TrimSpace(optString(args, "gitlab_token")),
+		Project: strings.TrimSpace(optString(args, "project")),
 	}
 	if cfg != nil {
 		if opts.BaseURL == "" {
@@ -245,9 +250,15 @@ func resolveGitLabToolOptions(args map[string]interface{}) (gitLabToolOptions, e
 		opts.BaseURL = "https://gitlab.com"
 	}
 	if opts.Token == "" {
+		if cfgErr != nil {
+			return opts, fmt.Errorf("GitLab token is required (config load failed: %w)", cfgErr)
+		}
 		return opts, fmt.Errorf("GitLab token is required")
 	}
 	if opts.Project == "" {
+		if cfgErr != nil {
+			return opts, fmt.Errorf("GitLab project is required (config load failed: %w)", cfgErr)
+		}
 		return opts, fmt.Errorf("GitLab project is required")
 	}
 	return opts, nil
@@ -263,9 +274,9 @@ func gitLabToolCreateIssueRequest(args map[string]interface{}, title, descriptio
 		Description:  description,
 		Labels:       splitGitLabToolCSV(optString(args, "labels")),
 		AssigneeIDs:  assigneeIDs,
-		DueDate:      optString(args, "due_date"),
+		DueDate:      strings.TrimSpace(optString(args, "due_date")),
 		Confidential: optBool(args, "confidential"),
-		IssueType:    optString(args, "issue_type"),
+		IssueType:    strings.TrimSpace(optString(args, "issue_type")),
 	}, nil
 }
 
@@ -295,13 +306,30 @@ func resolveMCPGitLabTAPDRef(raw, wantType, defaultWorkspace string) (workspaceI
 	if defaultWorkspace == "" {
 		return "", "", fmt.Errorf("workspace_id required (no default configured)")
 	}
-	return defaultWorkspace, raw, nil
+	return defaultWorkspace, expandMCPShortID(raw, defaultWorkspace), nil
+}
+
+// expandMCPShortID 镜像 cmd.expandShortID:对纯数字、长度 ≤ 9 的短 ID 左补零到 9 位,前缀 "11" + workspaceID。
+// 与 cmd 包同名函数同步维护(MCP 不能反向依赖 cmd 包)。
+func expandMCPShortID(id, workspaceID string) string {
+	if id == "" || workspaceID == "" {
+		return id
+	}
+	for _, c := range id {
+		if !unicode.IsDigit(c) {
+			return id
+		}
+	}
+	if len(id) > 9 {
+		return id
+	}
+	return "11" + workspaceID + fmt.Sprintf("%09s", id)
 }
 
 func buildMCPGitLabStorySnapshot(story *model.Story) gitLabToolSnapshot {
 	md := normalizedGitLabToolMarkdown(firstNonEmptyMCP(story.MarkdownDescription, story.Description))
 	title := strings.TrimSpace(story.Name)
-	description := renderGitLabToolSnapshot("TAPD 需求", story.URL, []string{
+	description := renderGitLabToolSnapshot("story", "TAPD 需求", story.URL, []string{
 		"ID: " + story.ID,
 		"Status: " + story.Status,
 		"Priority: " + firstNonEmptyMCP(story.PriorityLabel, story.Priority),
@@ -324,7 +352,7 @@ func buildMCPGitLabStorySnapshot(story *model.Story) gitLabToolSnapshot {
 func buildMCPGitLabBugSnapshot(bug *model.Bug) gitLabToolSnapshot {
 	md := normalizedGitLabToolMarkdown(bug.Description)
 	title := strings.TrimSpace(bug.Title)
-	description := renderGitLabToolSnapshot("TAPD 缺陷", bug.URL, []string{
+	description := renderGitLabToolSnapshot("bug", "TAPD 缺陷", bug.URL, []string{
 		"ID: " + bug.ID,
 		"Status: " + bug.Status,
 		"Priority: " + firstNonEmptyMCP(bug.PriorityLabel, bug.Priority),
@@ -379,7 +407,7 @@ func normalizedGitLabToolMarkdown(raw string) string {
 	return strings.TrimSpace(md)
 }
 
-func renderGitLabToolSnapshot(kind, tapdURL string, fields []string, md string) string {
+func renderGitLabToolSnapshot(entityType, kind, tapdURL string, fields []string, md string) string {
 	var b strings.Builder
 	b.WriteString("## ")
 	b.WriteString(kind)
@@ -390,16 +418,232 @@ func renderGitLabToolSnapshot(kind, tapdURL string, fields []string, md string) 
 		b.WriteString("\n")
 	}
 	for _, field := range fields {
-		if strings.TrimSpace(strings.TrimSuffix(field, ": ")) == "" {
+		// 字段格式 "Label: value":拆冒号后判断 value 是否为空,空则跳过整行。
+		idx := strings.Index(field, ":")
+		if idx >= 0 && strings.TrimSpace(field[idx+1:]) == "" {
 			continue
 		}
 		b.WriteString("- ")
 		b.WriteString(field)
 		b.WriteString("\n")
 	}
-	b.WriteString("\n## 描述\n\n")
-	b.WriteString(md)
+	structured := renderStructuredGitLabToolDescription(entityType, md)
+	if structured != "" {
+		b.WriteString("\n")
+		b.WriteString(structured)
+	}
 	return b.String()
+}
+
+type gitLabToolStructuredSection struct {
+	key      string
+	title    string
+	keywords []string
+}
+
+func renderStructuredGitLabToolDescription(entityType string, md string) string {
+	sections := gitLabToolStructuredSectionsFor(entityType)
+	grouped := make(map[string][]string, len(sections))
+	paragraphs := splitGitLabToolParagraphs(md)
+	for _, paragraph := range paragraphs {
+		key := classifyGitLabToolParagraph(entityType, paragraph)
+		if key == "" {
+			key = "original"
+			grouped[key] = append(grouped[key], paragraph)
+			continue
+		}
+		grouped[key] = append(grouped[key], trimGitLabToolParagraphLabel(paragraph))
+	}
+
+	var b strings.Builder
+	for _, section := range sections {
+		items := grouped[section.key]
+		if len(items) == 0 {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("## ")
+		b.WriteString(section.title)
+		b.WriteString("\n\n")
+		b.WriteString(strings.Join(items, "\n\n"))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func gitLabToolStructuredSectionsFor(entityType string) []gitLabToolStructuredSection {
+	switch entityType {
+	case "bug":
+		return []gitLabToolStructuredSection{
+			{key: "summary", title: "问题概述", keywords: []string{"问题", "标题", "现象", "概述"}},
+			{key: "condition", title: "复现条件", keywords: []string{"前置条件", "环境", "版本", "账号", "数据", "机型"}},
+			{key: "steps", title: "复现步骤", keywords: []string{"复现", "步骤", "流程", "操作"}},
+			{key: "expected", title: "预期结果", keywords: []string{"预期", "应该", "期望"}},
+			{key: "actual", title: "实际结果", keywords: []string{"实际", "现状", "结果", "报错"}},
+			{key: "impact", title: "影响范围", keywords: []string{"影响", "范围", "严重性", "频率", "用户"}},
+			{key: "clue", title: "排查线索", keywords: []string{"日志", "接口", "curl", "trace", "截图", "线索", "分析"}},
+			{key: "original", title: "原始补充"},
+		}
+	default:
+		return []gitLabToolStructuredSection{
+			{key: "background", title: "背景 / 现状", keywords: []string{"背景", "现状", "问题", "为什么", "痛点", "诉求", "上下文"}},
+			{key: "goal", title: "目标 / 预期", keywords: []string{"目标", "预期", "收益", "价值", "指标", "成功标准"}},
+			{key: "scope", title: "需求范围 / 方案", keywords: []string{"范围", "方案", "怎么做", "功能", "流程", "交互", "规则", "逻辑"}},
+			{key: "acceptance", title: "验收标准 / 测试要点", keywords: []string{"验收", "测试", "验证", "case", "用例", "准入", "完成标准"}},
+			{key: "risk", title: "风险 / 依赖 / 待确认", keywords: []string{"风险", "依赖", "待确认", "限制", "注意事项"}},
+			{key: "original", title: "原始补充"},
+		}
+	}
+}
+
+func classifyGitLabToolParagraph(entityType string, paragraph string) string {
+	head := gitLabToolParagraphClassifyText(paragraph)
+	if head == "" {
+		return ""
+	}
+	for _, section := range gitLabToolStructuredSectionsFor(entityType) {
+		if section.key == "original" {
+			continue
+		}
+		for _, keyword := range section.keywords {
+			if strings.Contains(head, strings.ToLower(keyword)) {
+				return section.key
+			}
+		}
+	}
+	return ""
+}
+
+func gitLabToolParagraphClassifyText(paragraph string) string {
+	paragraph = strings.TrimSpace(paragraph)
+	isHeading := strings.HasPrefix(paragraph, "#")
+	paragraph = strings.TrimLeft(paragraph, "#-*> \t")
+	if idx := strings.IndexAny(paragraph, "：:\n"); idx >= 0 {
+		paragraph = paragraph[:idx]
+	} else if !isHeading {
+		lower := strings.ToLower(paragraph)
+		for _, prefix := range []string{"日志", "trace", "curl", "截图", "接口"} {
+			if strings.HasPrefix(lower, strings.ToLower(prefix)) {
+				return lower
+			}
+		}
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(paragraph))
+}
+
+func splitGitLabToolParagraphs(md string) []string {
+	md = strings.TrimSpace(md)
+	if md == "" {
+		return nil
+	}
+	lines := strings.Split(md, "\n")
+	var paragraphs []string
+	var current strings.Builder
+	flush := func() {
+		text := strings.TrimSpace(current.String())
+		if text != "" {
+			paragraphs = append(paragraphs, text)
+		}
+		current.Reset()
+	}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if currentGitLabToolContainsOnlyHeading(current.String()) {
+				continue
+			}
+			flush()
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			flush()
+			current.WriteString(trimmed)
+			current.WriteString("\n")
+			continue
+		}
+		if looksLikeGitLabToolLabel(trimmed) {
+			flush()
+		}
+		if current.Len() > 0 {
+			current.WriteString("\n")
+		}
+		current.WriteString(trimmed)
+	}
+	flush()
+	return paragraphs
+}
+
+func currentGitLabToolContainsOnlyHeading(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, "#") && !strings.Contains(text, "\n")
+}
+
+func looksLikeGitLabToolLabel(line string) bool {
+	line = strings.TrimLeft(line, "-*> \t")
+	idx := strings.IndexAny(line, "：:")
+	if idx <= 0 || idx > 24 {
+		return false
+	}
+	prefix := strings.TrimSpace(line[:idx])
+	if prefix == "" {
+		return false
+	}
+	for _, section := range gitLabToolStructuredSectionsFor("story") {
+		for _, keyword := range section.keywords {
+			if strings.Contains(prefix, keyword) {
+				return true
+			}
+		}
+	}
+	for _, section := range gitLabToolStructuredSectionsFor("bug") {
+		for _, keyword := range section.keywords {
+			if strings.Contains(prefix, keyword) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func trimGitLabToolParagraphLabel(paragraph string) string {
+	paragraph = strings.TrimSpace(paragraph)
+	lines := strings.SplitN(paragraph, "\n", 2)
+	first := strings.TrimSpace(lines[0])
+	if strings.HasPrefix(first, "#") {
+		first = strings.TrimSpace(strings.TrimLeft(first, "# "))
+		if len(lines) == 1 {
+			return first
+		}
+		rest := strings.TrimSpace(lines[1])
+		if rest == "" {
+			return first
+		}
+		return rest
+	}
+	cleaned := strings.TrimLeft(first, "-*> \t")
+	if key, value, ok := splitGitLabToolLabel(cleaned); ok && len([]rune(key)) <= 24 {
+		if value != "" {
+			if len(lines) == 1 {
+				return value
+			}
+			return strings.TrimSpace(value + "\n" + lines[1])
+		}
+	}
+	return paragraph
+}
+
+func splitGitLabToolLabel(text string) (string, string, bool) {
+	for idx, r := range text {
+		if r != '：' && r != ':' {
+			continue
+		}
+		key := strings.TrimSpace(text[:idx])
+		value := strings.TrimSpace(text[idx+len(string(r)):])
+		return key, value, key != ""
+	}
+	return "", "", false
 }
 
 func isGitLabToolSnapshotReady(title, markdownDescription string) bool {
