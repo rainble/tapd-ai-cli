@@ -47,6 +47,9 @@ func RegisterDefaultTools(s *Server, defaultWorkspaceID string) {
 	s.Register(toolIterationList(s, ws))
 	s.Register(toolCommentList(s, ws))
 	s.Register(toolCommentAdd(s, ws))
+	s.Register(toolGitLabIssueCreate(s))
+	s.Register(toolGitLabIssueCreateFromStory(s, ws))
+	s.Register(toolGitLabIssueCreateFromBug(s, ws))
 }
 
 // schema 把字面量 JSON 转成 RawMessage，避免每个工具都重复写 json.RawMessage([]byte(...))。

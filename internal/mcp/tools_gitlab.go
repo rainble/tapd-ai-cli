@@ -1,0 +1,464 @@
+// Package mcp 中的 tools_gitlab.go 注册 GitLab Issue 相关 MCP tools。
+package mcp
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+
+	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/studyzy/tapd-ai-cli/internal/config"
+	"github.com/studyzy/tapd-ai-cli/internal/gitlab"
+	"github.com/studyzy/tapd-ai-cli/internal/tapdurl"
+	"github.com/studyzy/tapd-sdk-go/model"
+)
+
+type gitLabToolOptions struct {
+	BaseURL string
+	Token   string
+	Project string
+}
+
+type gitLabIssueToolResponse struct {
+	Success   bool   `json:"success"`
+	ID        int    `json:"id"`
+	IID       int    `json:"iid"`
+	URL       string `json:"url"`
+	Project   string `json:"project"`
+	ProjectID int    `json:"project_id,omitempty"`
+}
+
+type gitLabToolSnapshot struct {
+	EntityType  string
+	EntityID    string
+	WorkspaceID string
+	Title       string
+	Description string
+	Fingerprint string
+	Ready       bool
+}
+
+type gitLabToolSyncMarker struct {
+	Type        string `json:"type"`
+	ID          string `json:"id"`
+	Project     string `json:"project"`
+	IssueIID    int    `json:"issue_iid"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+func toolGitLabIssueCreate(s *Server) *Tool {
+	return &Tool{
+		Name:        "tapd_gitlab_issue_create",
+		Description: "Create a GitLab issue. Uses gitlab_base_url/gitlab_token/gitlab_project config or GITLAB_* env vars.",
+		AllowNoTAPD: true,
+		InputSchema: schema(`{
+			"type":"object",
+			"properties":{
+				"gitlab_base_url":{"type":"string"},
+				"gitlab_token":{"type":"string"},
+				"project":{"type":"string","description":"GitLab project ID or path, e.g. go-vas/vas"},
+				"title":{"type":"string"},
+				"description":{"type":"string"},
+				"labels":{"type":"string","description":"comma-separated labels"},
+				"assignee_ids":{"type":"string","description":"comma-separated GitLab numeric user IDs"},
+				"due_date":{"type":"string","description":"YYYY-MM-DD"},
+				"confidential":{"type":"boolean"},
+				"issue_type":{"type":"string"}
+			},
+			"required":["title"],
+			"additionalProperties":false
+		}`),
+		Handler: func(ctx context.Context, raw json.RawMessage) (interface{}, error) {
+			args, err := parseArgs(raw)
+			if err != nil {
+				return nil, err
+			}
+			title, err := requireString(args, "title")
+			if err != nil {
+				return nil, err
+			}
+			opts, err := resolveGitLabToolOptions(args)
+			if err != nil {
+				return nil, err
+			}
+			req, err := gitLabToolCreateIssueRequest(args, title, optString(args, "description"))
+			if err != nil {
+				return nil, err
+			}
+			issue, err := gitlab.NewClient(opts.BaseURL, opts.Token).CreateIssue(ctx, opts.Project, req)
+			if err != nil {
+				return nil, err
+			}
+			return gitLabToolResponse(issue, opts.Project), nil
+		},
+	}
+}
+
+func toolGitLabIssueCreateFromStory(s *Server, ws func(string) string) *Tool {
+	return &Tool{
+		Name:        "tapd_gitlab_issue_create_from_story",
+		Description: "Create a GitLab issue from a TAPD story. Can optionally comment the GitLab issue link back to TAPD.",
+		InputSchema: schema(`{
+			"type":"object",
+			"properties":{
+				"id":{"type":"string","description":"TAPD story ID or URL"},
+				"workspace_id":{"type":"string"},
+				"gitlab_base_url":{"type":"string"},
+				"gitlab_token":{"type":"string"},
+				"project":{"type":"string"},
+				"labels":{"type":"string"},
+				"assignee_ids":{"type":"string"},
+				"due_date":{"type":"string"},
+				"confidential":{"type":"boolean"},
+				"issue_type":{"type":"string"},
+				"comment_back":{"type":"boolean"}
+			},
+			"required":["id"],
+			"additionalProperties":false
+		}`),
+		Handler: func(ctx context.Context, raw json.RawMessage) (interface{}, error) {
+			args, err := parseArgs(raw)
+			if err != nil {
+				return nil, err
+			}
+			rawID, err := requireString(args, "id")
+			if err != nil {
+				return nil, err
+			}
+			workspaceID, storyID, err := resolveMCPGitLabTAPDRef(rawID, "story", ws(optString(args, "workspace_id")))
+			if err != nil {
+				return nil, err
+			}
+			story, err := s.client.GetStory(ctx, workspaceID, storyID)
+			if err != nil {
+				return nil, err
+			}
+			if story.WorkspaceID == "" {
+				story.WorkspaceID = workspaceID
+			}
+			return createGitLabIssueFromMCP(ctx, s, args, buildMCPGitLabStorySnapshot(story))
+		},
+	}
+}
+
+func toolGitLabIssueCreateFromBug(s *Server, ws func(string) string) *Tool {
+	return &Tool{
+		Name:        "tapd_gitlab_issue_create_from_bug",
+		Description: "Create a GitLab issue from a TAPD bug. Can optionally comment the GitLab issue link back to TAPD.",
+		InputSchema: schema(`{
+			"type":"object",
+			"properties":{
+				"id":{"type":"string","description":"TAPD bug ID or URL"},
+				"workspace_id":{"type":"string"},
+				"gitlab_base_url":{"type":"string"},
+				"gitlab_token":{"type":"string"},
+				"project":{"type":"string"},
+				"labels":{"type":"string"},
+				"assignee_ids":{"type":"string"},
+				"due_date":{"type":"string"},
+				"confidential":{"type":"boolean"},
+				"issue_type":{"type":"string"},
+				"comment_back":{"type":"boolean"}
+			},
+			"required":["id"],
+			"additionalProperties":false
+		}`),
+		Handler: func(ctx context.Context, raw json.RawMessage) (interface{}, error) {
+			args, err := parseArgs(raw)
+			if err != nil {
+				return nil, err
+			}
+			rawID, err := requireString(args, "id")
+			if err != nil {
+				return nil, err
+			}
+			workspaceID, bugID, err := resolveMCPGitLabTAPDRef(rawID, "bug", ws(optString(args, "workspace_id")))
+			if err != nil {
+				return nil, err
+			}
+			bug, err := s.client.GetBug(ctx, workspaceID, bugID)
+			if err != nil {
+				return nil, err
+			}
+			if bug.WorkspaceID == "" {
+				bug.WorkspaceID = workspaceID
+			}
+			return createGitLabIssueFromMCP(ctx, s, args, buildMCPGitLabBugSnapshot(bug))
+		},
+	}
+}
+
+func createGitLabIssueFromMCP(ctx context.Context, s *Server, args map[string]interface{}, snapshot gitLabToolSnapshot) (interface{}, error) {
+	if !snapshot.Ready {
+		return nil, fmt.Errorf("TAPD title and description are required before creating GitLab issue")
+	}
+	opts, err := resolveGitLabToolOptions(args)
+	if err != nil {
+		return nil, err
+	}
+	req, err := gitLabToolCreateIssueRequest(args, snapshot.Title, snapshot.Description)
+	if err != nil {
+		return nil, err
+	}
+	issue, err := gitlab.NewClient(opts.BaseURL, opts.Token).CreateIssue(ctx, opts.Project, req)
+	if err != nil {
+		return nil, err
+	}
+	if optBool(args, "comment_back") {
+		marker := gitLabToolSyncMarker{
+			Type:        snapshot.EntityType,
+			ID:          snapshot.EntityID,
+			Project:     opts.Project,
+			IssueIID:    issue.IID,
+			Fingerprint: snapshot.Fingerprint,
+		}
+		if err := addMCPGitLabSyncComment(ctx, s, snapshot, issue.WebURL, marker); err != nil {
+			return gitLabToolResponse(issue, opts.Project), fmt.Errorf("comment_back_failed: %w", err)
+		}
+	}
+	return gitLabToolResponse(issue, opts.Project), nil
+}
+
+func resolveGitLabToolOptions(args map[string]interface{}) (gitLabToolOptions, error) {
+	cfg, _ := config.LoadConfig()
+	opts := gitLabToolOptions{
+		BaseURL: optString(args, "gitlab_base_url"),
+		Token:   optString(args, "gitlab_token"),
+		Project: optString(args, "project"),
+	}
+	if cfg != nil {
+		if opts.BaseURL == "" {
+			opts.BaseURL = cfg.GitLabBaseURL
+		}
+		if opts.Token == "" {
+			opts.Token = cfg.GitLabToken
+		}
+		if opts.Project == "" {
+			opts.Project = cfg.GitLabProject
+		}
+	}
+	if opts.BaseURL == "" {
+		opts.BaseURL = "https://gitlab.com"
+	}
+	if opts.Token == "" {
+		return opts, fmt.Errorf("GitLab token is required")
+	}
+	if opts.Project == "" {
+		return opts, fmt.Errorf("GitLab project is required")
+	}
+	return opts, nil
+}
+
+func gitLabToolCreateIssueRequest(args map[string]interface{}, title, description string) (gitlab.CreateIssueRequest, error) {
+	assigneeIDs, err := parseGitLabToolIntCSV(optString(args, "assignee_ids"))
+	if err != nil {
+		return gitlab.CreateIssueRequest{}, err
+	}
+	return gitlab.CreateIssueRequest{
+		Title:        strings.TrimSpace(title),
+		Description:  description,
+		Labels:       splitGitLabToolCSV(optString(args, "labels")),
+		AssigneeIDs:  assigneeIDs,
+		DueDate:      optString(args, "due_date"),
+		Confidential: optBool(args, "confidential"),
+		IssueType:    optString(args, "issue_type"),
+	}, nil
+}
+
+func gitLabToolResponse(issue *gitlab.Issue, project string) gitLabIssueToolResponse {
+	return gitLabIssueToolResponse{
+		Success:   true,
+		ID:        issue.ID,
+		IID:       issue.IID,
+		URL:       issue.WebURL,
+		Project:   project,
+		ProjectID: issue.ProjectID,
+	}
+}
+
+func resolveMCPGitLabTAPDRef(raw, wantType, defaultWorkspace string) (workspaceID, entityID string, err error) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		parsed, err := tapdurl.Parse(raw)
+		if err != nil {
+			return "", "", err
+		}
+		if parsed.EntityType != wantType {
+			return "", "", fmt.Errorf("expected %s URL, got %s", wantType, parsed.EntityType)
+		}
+		return parsed.WorkspaceID, parsed.EntityID, nil
+	}
+	if defaultWorkspace == "" {
+		return "", "", fmt.Errorf("workspace_id required (no default configured)")
+	}
+	return defaultWorkspace, raw, nil
+}
+
+func buildMCPGitLabStorySnapshot(story *model.Story) gitLabToolSnapshot {
+	md := normalizedGitLabToolMarkdown(firstNonEmptyMCP(story.MarkdownDescription, story.Description))
+	title := strings.TrimSpace(story.Name)
+	description := renderGitLabToolSnapshot("TAPD 需求", story.URL, []string{
+		"ID: " + story.ID,
+		"Status: " + story.Status,
+		"Priority: " + firstNonEmptyMCP(story.PriorityLabel, story.Priority),
+		"Owner: " + story.Owner,
+		"Developer: " + story.Developer,
+		"Iteration: " + story.IterationID,
+	}, md)
+	return gitLabToolSnapshot{
+		EntityType:  "story",
+		EntityID:    story.ID,
+		WorkspaceID: story.WorkspaceID,
+		Title:       "[TAPD Story] " + title,
+		Description: description,
+		Fingerprint: fingerprintGitLabToolSnapshot("story", story.ID, title, md, story.Status,
+			firstNonEmptyMCP(story.PriorityLabel, story.Priority), story.Owner, story.Developer),
+		Ready: isGitLabToolSnapshotReady(title, md),
+	}
+}
+
+func buildMCPGitLabBugSnapshot(bug *model.Bug) gitLabToolSnapshot {
+	md := normalizedGitLabToolMarkdown(bug.Description)
+	title := strings.TrimSpace(bug.Title)
+	description := renderGitLabToolSnapshot("TAPD 缺陷", bug.URL, []string{
+		"ID: " + bug.ID,
+		"Status: " + bug.Status,
+		"Priority: " + firstNonEmptyMCP(bug.PriorityLabel, bug.Priority),
+		"Severity: " + bug.Severity,
+		"Current owner: " + bug.CurrentOwner,
+		"Module: " + bug.Module,
+		"Iteration: " + bug.IterationID,
+	}, md)
+	return gitLabToolSnapshot{
+		EntityType:  "bug",
+		EntityID:    bug.ID,
+		WorkspaceID: bug.WorkspaceID,
+		Title:       "[TAPD Bug] " + title,
+		Description: description,
+		Fingerprint: fingerprintGitLabToolSnapshot("bug", bug.ID, title, md, bug.Status,
+			firstNonEmptyMCP(bug.PriorityLabel, bug.Priority), bug.CurrentOwner, bug.Severity, bug.Module),
+		Ready: isGitLabToolSnapshotReady(title, md),
+	}
+}
+
+func addMCPGitLabSyncComment(ctx context.Context, s *Server, snapshot gitLabToolSnapshot, issueURL string, marker gitLabToolSyncMarker) error {
+	entryType := "stories"
+	if snapshot.EntityType == "bug" {
+		entryType = "bug"
+	}
+	author := s.client.GetNick()
+	if author == "" {
+		_ = s.client.FetchNick(ctx)
+		author = s.client.GetNick()
+	}
+	_, err := s.client.AddComment(ctx, &model.AddCommentRequest{
+		WorkspaceID: snapshot.WorkspaceID,
+		EntryType:   entryType,
+		EntryID:     snapshot.EntityID,
+		Description: markdownToHTML(renderMCPGitLabSyncComment(issueURL, marker)),
+		Author:      author,
+	})
+	return err
+}
+
+func renderMCPGitLabSyncComment(issueURL string, marker gitLabToolSyncMarker) string {
+	data, _ := json.Marshal(marker)
+	return fmt.Sprintf("已同步 GitLab Issue: %s\n\n<!-- tapd-gitlab-sync %s -->", issueURL, data)
+}
+
+func normalizedGitLabToolMarkdown(raw string) string {
+	md, err := htmltomarkdown.ConvertString(raw)
+	if err != nil {
+		md = raw
+	}
+	md = strings.ReplaceAll(md, "\u00a0", " ")
+	return strings.TrimSpace(md)
+}
+
+func renderGitLabToolSnapshot(kind, tapdURL string, fields []string, md string) string {
+	var b strings.Builder
+	b.WriteString("## ")
+	b.WriteString(kind)
+	b.WriteString("\n\n")
+	if strings.TrimSpace(tapdURL) != "" {
+		b.WriteString("- TAPD: ")
+		b.WriteString(strings.TrimSpace(tapdURL))
+		b.WriteString("\n")
+	}
+	for _, field := range fields {
+		if strings.TrimSpace(strings.TrimSuffix(field, ": ")) == "" {
+			continue
+		}
+		b.WriteString("- ")
+		b.WriteString(field)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n## 描述\n\n")
+	b.WriteString(md)
+	return b.String()
+}
+
+func isGitLabToolSnapshotReady(title, markdownDescription string) bool {
+	title = strings.TrimSpace(title)
+	md := strings.TrimSpace(markdownDescription)
+	return title != "" && md != "" && md != "<p><br></p>"
+}
+
+func fingerprintGitLabToolSnapshot(parts ...string) string {
+	normalized := make([]string, 0, len(parts))
+	for _, part := range parts {
+		normalized = append(normalized, strings.TrimSpace(part))
+	}
+	sum := sha256.Sum256([]byte(strings.Join(normalized, "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
+func parseGitLabToolIntCSV(raw string) ([]int, error) {
+	parts := splitGitLabToolCSV(raw)
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		v, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid assignee id %q", part)
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func splitGitLabToolCSV(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if v := strings.TrimSpace(part); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func optBool(args map[string]interface{}, key string) bool {
+	if v, ok := args[key].(bool); ok {
+		return v
+	}
+	return false
+}
+
+func firstNonEmptyMCP(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}

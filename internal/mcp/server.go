@@ -73,6 +73,7 @@ type Tool struct {
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"`
 	Handler     ToolHandler     `json:"-"`
+	AllowNoTAPD bool            `json:"-"`
 }
 
 // Resource 描述一个 MCP 资源的元信息和读取体。
@@ -232,7 +233,7 @@ func (s *Server) handleToolsCall(ctx context.Context, req rpcRequest) {
 		s.writeError(req.ID, errMethodNotFound, "tool not found: "+p.Name)
 		return
 	}
-	if s.client == nil {
+	if s.client == nil && !tool.AllowNoTAPD {
 		s.writeIsErrorText(req.ID,
 			"TAPD credentials not configured: please run 'tapd auth login --access-token <token>' "+
 				"(or set TAPD_ACCESS_TOKEN), then restart the MCP server.")
