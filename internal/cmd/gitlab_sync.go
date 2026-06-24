@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +14,14 @@ import (
 	"time"
 
 	"github.com/studyzy/tapd-ai-cli/internal/gitlab"
+	"github.com/studyzy/tapd-ai-cli/internal/output"
+	tapd "github.com/studyzy/tapd-sdk-go"
 	"github.com/studyzy/tapd-sdk-go/model"
 )
+
+var gitLabStoryProjectRules = map[string]string{
+	"充电": "go-vas/vas",
+}
 
 func parseGitLabSyncTypes(raw string) map[string]bool {
 	if strings.TrimSpace(raw) == "" {
@@ -30,6 +37,32 @@ func parseGitLabSyncTypes(raw string) map[string]bool {
 		}
 	}
 	return out
+}
+
+func resolveGitLabSyncOptions() (gitLabOptions, error) {
+	opts := gitLabOptions{
+		baseURL: strings.TrimSpace(flagGitLabBaseURL),
+		token:   strings.TrimSpace(flagGitLabToken),
+		project: strings.TrimSpace(flagGitLabProject),
+	}
+	if appConfig != nil {
+		if opts.baseURL == "" {
+			opts.baseURL = appConfig.GitLabBaseURL
+		}
+		if opts.token == "" {
+			opts.token = appConfig.GitLabToken
+		}
+		if opts.project == "" {
+			opts.project = appConfig.GitLabProject
+		}
+	}
+	if opts.baseURL == "" {
+		opts.baseURL = "https://gitlab.com"
+	}
+	if opts.token == "" {
+		return opts, fmt.Errorf("GitLab token is required")
+	}
+	return opts, nil
 }
 
 func handleGitLabIssueSyncEvent(ctx context.Context, data string, cfg gitLabSyncConfig) (bool, error) {
@@ -51,17 +84,47 @@ func handleGitLabIssueSyncEvent(ctx context.Context, data string, cfg gitLabSync
 	}
 	snapshot, err := loadGitLabSyncSnapshot(ctx, target)
 	if err != nil {
+		if isGitLabSyncNotFoundError(err) {
+			fmt.Fprintf(os.Stderr, "gitlab sync-watch: skip %s %s reason=not_found\n", target.EntityType, target.EntityID)
+			return false, nil
+		}
 		return false, err
 	}
 	if !snapshot.Ready {
 		fmt.Fprintf(os.Stderr, "gitlab sync-watch: skip %s %s reason=not_ready\n", target.EntityType, target.EntityID)
 		return false, nil
 	}
-	marker, hasMarker, err := findGitLabSyncMarker(ctx, snapshot, cfg.options.project)
+	opts, ok := resolveGitLabSyncProject(cfg.options, snapshot)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "gitlab sync-watch: skip %s %s reason=no_project_rule\n", target.EntityType, target.EntityID)
+		return false, nil
+	}
+	marker, hasMarker, err := findGitLabSyncMarker(ctx, snapshot, opts.project)
 	if err != nil {
 		return false, err
 	}
-	return syncGitLabSnapshot(ctx, cfg.options, snapshot, marker, hasMarker)
+	return syncGitLabSnapshot(ctx, opts, snapshot, marker, hasMarker)
+}
+
+func isGitLabSyncNotFoundError(err error) bool {
+	var tapdErr *tapd.TAPDError
+	if errors.As(err, &tapdErr) {
+		return tapdErr.ExitCode == output.ExitNotFound
+	}
+	return false
+}
+
+func resolveGitLabSyncProject(opts gitLabOptions, snapshot gitLabIssueSnapshot) (gitLabOptions, bool) {
+	if snapshot.EntityType != "story" {
+		return opts, strings.TrimSpace(opts.project) != ""
+	}
+	for keyword, project := range gitLabStoryProjectRules {
+		if strings.Contains(snapshot.Title, keyword) {
+			opts.project = project
+			return opts, true
+		}
+	}
+	return opts, false
 }
 
 func syncGitLabSnapshot(

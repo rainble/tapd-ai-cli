@@ -124,6 +124,20 @@ func TestGitLabIssueCreate_MissingToken(t *testing.T) {
 	}
 }
 
+func TestResolveGitLabSyncOptions_AllowsEmptyProject(t *testing.T) {
+	resetGitLabFlagsForTest(t)
+	flagGitLabBaseURL = "https://git.example.com"
+	flagGitLabToken = "secret"
+
+	opts, err := resolveGitLabSyncOptions()
+	if err != nil {
+		t.Fatalf("resolveGitLabSyncOptions returned error: %v", err)
+	}
+	if opts.project != "" {
+		t.Fatalf("project = %q, want empty", opts.project)
+	}
+}
+
 func TestIsGitLabStandaloneCreate(t *testing.T) {
 	if !isGitLabStandaloneCreate(gitlabIssueCreateCmd) {
 		t.Fatal("gitlab issue create should skip TAPD init")
@@ -338,6 +352,37 @@ func TestGitLabSnapshotFingerprintChangesWithStatus(t *testing.T) {
 	}
 }
 
+func TestResolveGitLabSyncProject_RoutesChargingStoryTitle(t *testing.T) {
+	snapshot := gitLabIssueSnapshot{
+		EntityType: "story",
+		Title:      "[TAPD Story] 充电订单联调",
+	}
+
+	opts, ok := resolveGitLabSyncProject(gitLabOptions{baseURL: "https://git.example.com", token: "secret"}, snapshot)
+	if !ok {
+		t.Fatal("charging story title should resolve a GitLab project")
+	}
+	if opts.project != "go-vas/vas" {
+		t.Fatalf("project = %q, want go-vas/vas", opts.project)
+	}
+}
+
+func TestResolveGitLabSyncProject_SkipsUnmatchedStoryEvenWithConfiguredProject(t *testing.T) {
+	snapshot := gitLabIssueSnapshot{
+		EntityType: "story",
+		Title:      "[TAPD Story] 普通后台需求",
+	}
+
+	_, ok := resolveGitLabSyncProject(gitLabOptions{
+		baseURL: "https://git.example.com",
+		token:   "secret",
+		project: "fallback/project",
+	}, snapshot)
+	if ok {
+		t.Fatal("unmatched story title should not use configured fallback project")
+	}
+}
+
 func TestGitLabIssueCreateFromStory_CreatesIssueAndCommentsBack(t *testing.T) {
 	resetGitLabFlagsForTest(t)
 	oldClient := apiClient
@@ -454,6 +499,7 @@ func TestHandleGitLabIssueSyncEvent_CreatesIssueWhenNoMarker(t *testing.T) {
 
 	var commentBody string
 	tapdSrv := newGitLabSyncTAPDServer(t, gitLabSyncTAPDOptions{
+		storyName:        "充电需求标题",
 		storyDescription: "<p>需求描述</p>",
 		commentsJSON:     `[]`,
 		onComment: func(desc string) {
@@ -475,7 +521,7 @@ func TestHandleGitLabIssueSyncEvent_CreatesIssueWhenNoMarker(t *testing.T) {
 	apiClient = tapd.NewClientWithBaseURL(tapdSrv.URL, tapdSrv.URL, "tapd-token", "", "")
 	flagWorkspaceID = "51081496"
 	cfg := gitLabSyncConfig{
-		options: gitLabOptions{baseURL: gitlabSrv.URL, token: "gitlab-token", project: "go-vas/vas"},
+		options: gitLabOptions{baseURL: gitlabSrv.URL, token: "gitlab-token"},
 		types:   map[string]bool{"story": true, "bug": true},
 	}
 	event := `{"id":1,"event":{"event":"story::update","workspace_id":"51081496","story":{"id":"1151081496001028684"}}}`
@@ -510,6 +556,7 @@ func TestHandleGitLabIssueSyncEvent_AppendsNoteWhenFingerprintChanged(t *testing
 	})
 	var commentWrites int
 	tapdSrv := newGitLabSyncTAPDServer(t, gitLabSyncTAPDOptions{
+		storyName:        "充电需求标题",
 		storyDescription: "<p>新的需求描述</p>",
 		commentsJSON:     `[{"Comment":{"id":"c1","description":` + strconv.Quote(marker) + `}}]`,
 		onComment: func(desc string) {
@@ -531,7 +578,7 @@ func TestHandleGitLabIssueSyncEvent_AppendsNoteWhenFingerprintChanged(t *testing
 	apiClient = tapd.NewClientWithBaseURL(tapdSrv.URL, tapdSrv.URL, "tapd-token", "", "")
 	flagWorkspaceID = "51081496"
 	cfg := gitLabSyncConfig{
-		options: gitLabOptions{baseURL: gitlabSrv.URL, token: "gitlab-token", project: "go-vas/vas"},
+		options: gitLabOptions{baseURL: gitlabSrv.URL, token: "gitlab-token"},
 		types:   map[string]bool{"story": true},
 	}
 	event := `{"id":2,"event":{"event":"story_update","workspace_id":"51081496","story":{"id":"1151081496001028684"}}}`
@@ -556,7 +603,7 @@ func TestHandleGitLabIssueSyncEvent_SkipsWhenFingerprintUnchanged(t *testing.T) 
 
 	story := &model.Story{
 		ID:          "1151081496001028684",
-		Name:        "需求标题",
+		Name:        "充电需求标题",
 		Description: "<p>需求描述</p>",
 		Status:      "open",
 	}
@@ -569,6 +616,7 @@ func TestHandleGitLabIssueSyncEvent_SkipsWhenFingerprintUnchanged(t *testing.T) 
 		Fingerprint: snapshot.Fingerprint,
 	})
 	tapdSrv := newGitLabSyncTAPDServer(t, gitLabSyncTAPDOptions{
+		storyName:        story.Name,
 		storyDescription: story.Description,
 		commentsJSON:     `[{"Comment":{"id":"c1","description":` + strconv.Quote(marker) + `}}]`,
 	})
@@ -582,7 +630,7 @@ func TestHandleGitLabIssueSyncEvent_SkipsWhenFingerprintUnchanged(t *testing.T) 
 	apiClient = tapd.NewClientWithBaseURL(tapdSrv.URL, tapdSrv.URL, "tapd-token", "", "")
 	flagWorkspaceID = "51081496"
 	cfg := gitLabSyncConfig{
-		options: gitLabOptions{baseURL: gitlabSrv.URL, token: "gitlab-token", project: "go-vas/vas"},
+		options: gitLabOptions{baseURL: gitlabSrv.URL, token: "gitlab-token"},
 		types:   map[string]bool{"story": true},
 	}
 	event := `{"id":3,"event":{"event":"story_update","workspace_id":"51081496","story":{"id":"1151081496001028684"}}}`
@@ -596,10 +644,88 @@ func TestHandleGitLabIssueSyncEvent_SkipsWhenFingerprintUnchanged(t *testing.T) 
 	}
 }
 
+func TestHandleGitLabIssueSyncEvent_SkipsStoryWithoutProjectRule(t *testing.T) {
+	resetGitLabFlagsForTest(t)
+	oldClient := apiClient
+	oldWorkspace := flagWorkspaceID
+	t.Cleanup(func() {
+		apiClient = oldClient
+		flagWorkspaceID = oldWorkspace
+	})
+
+	tapdSrv := newGitLabSyncTAPDServer(t, gitLabSyncTAPDOptions{
+		storyName:        "普通需求标题",
+		storyDescription: "<p>需求描述</p>",
+		commentsJSON:     `[]`,
+	})
+	defer tapdSrv.Close()
+
+	gitlabSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("GitLab should not be called when story title has no project rule")
+	}))
+	defer gitlabSrv.Close()
+
+	apiClient = tapd.NewClientWithBaseURL(tapdSrv.URL, tapdSrv.URL, "tapd-token", "", "")
+	flagWorkspaceID = "51081496"
+	cfg := gitLabSyncConfig{
+		options: gitLabOptions{baseURL: gitlabSrv.URL, token: "gitlab-token"},
+		types:   map[string]bool{"story": true},
+	}
+	event := `{"id":4,"event":{"event":"story_update","workspace_id":"51081496","story":{"id":"1151081496001028684"}}}`
+
+	handled, err := handleGitLabIssueSyncEvent(context.Background(), event, cfg)
+	if err != nil {
+		t.Fatalf("handleGitLabIssueSyncEvent returned error: %v", err)
+	}
+	if handled {
+		t.Fatal("story without project rule should be skipped")
+	}
+}
+
+func TestReadGitLabIssueSyncSSE_AdvancesWatermarkWhenStoryMissing(t *testing.T) {
+	resetGitLabFlagsForTest(t)
+	oldClient := apiClient
+	oldWorkspace := flagWorkspaceID
+	oldState := watchStateRef
+	t.Cleanup(func() {
+		apiClient = oldClient
+		flagWorkspaceID = oldWorkspace
+		watchStateRef = oldState
+	})
+
+	tapdSrv := newGitLabSyncTAPDServer(t, gitLabSyncTAPDOptions{
+		storyNotFound: true,
+	})
+	defer tapdSrv.Close()
+	gitlabSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("GitLab should not be called when TAPD story is missing")
+	}))
+	defer gitlabSrv.Close()
+
+	apiClient = tapd.NewClientWithBaseURL(tapdSrv.URL, tapdSrv.URL, "tapd-token", "", "")
+	flagWorkspaceID = "51081496"
+	watchStateRef = &watchState{}
+	cfg := gitLabSyncConfig{
+		options: gitLabOptions{baseURL: gitlabSrv.URL, token: "gitlab-token"},
+		types:   map[string]bool{"story": true},
+	}
+	body := strings.NewReader("event: tapd\nid: 9\ndata: {\"id\":9,\"received_at\":1,\"event\":{\"event\":\"story::update\",\"workspace_id\":\"51081496\",\"story\":{\"id\":\"1120063271004974284\"}}}\n\n")
+
+	err := readGitLabIssueSyncSSE(context.Background(), body, cfg)
+	if err != io.EOF {
+		t.Fatalf("readGitLabIssueSyncSSE error = %v, want EOF", err)
+	}
+	if watchStateRef.LastSeen() != 9 {
+		t.Fatalf("lastSeen = %d, want 9", watchStateRef.LastSeen())
+	}
+}
+
 type gitLabSyncTAPDOptions struct {
+	storyName        string
 	storyDescription string
 	commentsJSON     string
 	onComment        func(description string)
+	storyNotFound    bool
 }
 
 func newGitLabSyncTAPDServer(t *testing.T, opts gitLabSyncTAPDOptions) *httptest.Server {
@@ -607,10 +733,17 @@ func newGitLabSyncTAPDServer(t *testing.T, opts gitLabSyncTAPDOptions) *httptest
 	if opts.commentsJSON == "" {
 		opts.commentsJSON = `[]`
 	}
+	if opts.storyName == "" {
+		opts.storyName = "需求标题"
+	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/stories":
-			_, _ = w.Write([]byte(`{"status":1,"data":[{"Story":{"id":"1151081496001028684","name":"需求标题","description":` + strconv.Quote(opts.storyDescription) + `,"status":"open"}}]}`))
+			if opts.storyNotFound {
+				_, _ = w.Write([]byte(`{"status":1,"data":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"status":1,"data":[{"Story":{"id":"1151081496001028684","name":` + strconv.Quote(opts.storyName) + `,"description":` + strconv.Quote(opts.storyDescription) + `,"status":"open"}}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/comments":
 			_, _ = w.Write([]byte(`{"status":1,"data":` + opts.commentsJSON + `}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/users/info":

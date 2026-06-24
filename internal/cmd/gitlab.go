@@ -703,7 +703,7 @@ func runGitLabIssueCreateFromBug(cmd *cobra.Command, args []string) error {
 }
 
 func runGitLabIssueSyncWatch(cmd *cobra.Command, args []string) error {
-	opts, err := resolveGitLabOptions()
+	opts, err := resolveGitLabSyncOptions()
 	if err != nil {
 		output.PrintError(os.Stderr, "gitlab_config_error", err.Error(), "")
 		os.Exit(output.ExitParamError)
