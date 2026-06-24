@@ -51,6 +51,12 @@ var rootCmd = &cobra.Command{
 			appConfig = cfg
 			return nil
 		}
+		// 纯 GitLab issue 创建不依赖 TAPD API 凭据，命令内部自行校验 GitLab token。
+		if isGitLabStandaloneCreate(cmd) {
+			cfg, _ := config.LoadConfig()
+			appConfig = cfg
+			return nil
+		}
 		// mcp 是 stdio server：缺凭据时不强制退出，server 仍正常起动，
 		// 真正调用 TAPD 的 tool 会以 isError content 形式提示登录。
 		// 让客户端（Claude Code 等）能看到 server 启动 + 工具列表。
@@ -66,6 +72,17 @@ var rootCmd = &cobra.Command{
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
+}
+
+// isGitLabStandaloneCreate 判断当前命令是否为不依赖 TAPD 的 gitlab issue create。
+func isGitLabStandaloneCreate(cmd *cobra.Command) bool {
+	if cmd == nil || cmd.Name() != "create" || cmd.Parent() == nil || cmd.Parent().Name() != "issue" {
+		return false
+	}
+	if cmd.Parent().Parent() == nil {
+		return false
+	}
+	return cmd.Parent().Parent().Name() == "gitlab"
 }
 
 // Execute 执行根命令

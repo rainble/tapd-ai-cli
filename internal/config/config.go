@@ -18,6 +18,9 @@ type Config struct {
 	BaseURL        string `json:"base_url,omitempty"`
 	WatchEndpoint  string `json:"watch_endpoint,omitempty"`  // SSE 订阅地址，例如 https://upower.example.co/x/upower/tapd/events
 	SubscribeToken string `json:"subscribe_token,omitempty"` // 订阅鉴权 token，对应服务端 SSE.SubscribeToken
+	GitLabBaseURL  string `json:"gitlab_base_url,omitempty"`
+	GitLabToken    string `json:"gitlab_token,omitempty"`
+	GitLabProject  string `json:"gitlab_project,omitempty"`
 }
 
 // LoadConfig 按优先级加载配置：环境变量 > ./.tapd.json > ~/.tapd.json
@@ -61,6 +64,15 @@ func LoadConfig() (*Config, error) {
 		if localCfg.SubscribeToken != "" {
 			cfg.SubscribeToken = localCfg.SubscribeToken
 		}
+		if localCfg.GitLabBaseURL != "" {
+			cfg.GitLabBaseURL = localCfg.GitLabBaseURL
+		}
+		if localCfg.GitLabToken != "" {
+			cfg.GitLabToken = localCfg.GitLabToken
+		}
+		if localCfg.GitLabProject != "" {
+			cfg.GitLabProject = localCfg.GitLabProject
+		}
 	}
 
 	// 环境变量优先级最高
@@ -72,6 +84,9 @@ func LoadConfig() (*Config, error) {
 	envURL := os.Getenv("TAPD_BASE_URL")
 	envWatch := os.Getenv("TAPD_WATCH_ENDPOINT")
 	envSubToken := os.Getenv("TAPD_SUBSCRIBE_TOKEN")
+	envGitLabBaseURL := os.Getenv("GITLAB_BASE_URL")
+	envGitLabToken := os.Getenv("GITLAB_TOKEN")
+	envGitLabProject := os.Getenv("GITLAB_PROJECT")
 
 	if envToken != "" || envUser != "" {
 		cfg.AccessToken = envToken
@@ -92,6 +107,15 @@ func LoadConfig() (*Config, error) {
 	}
 	if envSubToken != "" {
 		cfg.SubscribeToken = envSubToken
+	}
+	if envGitLabBaseURL != "" {
+		cfg.GitLabBaseURL = envGitLabBaseURL
+	}
+	if envGitLabToken != "" {
+		cfg.GitLabToken = envGitLabToken
+	}
+	if envGitLabProject != "" {
+		cfg.GitLabProject = envGitLabProject
 	}
 
 	return cfg, nil

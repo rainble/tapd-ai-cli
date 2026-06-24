@@ -54,6 +54,16 @@ func resetFlags() {
 	flagAssistantProjectSince = ""
 	flagAssistantProjectTargetStatus = ""
 	flagAssistantProjectLimit = 200
+	flagGitLabBaseURL = ""
+	flagGitLabToken = ""
+	flagGitLabProject = ""
+	flagGitLabLabels = ""
+	flagGitLabAssigneeIDs = ""
+	flagGitLabDueDate = ""
+	flagGitLabConfidential = false
+	flagGitLabIssueType = ""
+	flagGitLabCommentBack = false
+	flagGitLabTypes = ""
 
 	// testx 共享 flags
 	flagTxNamespace = ""

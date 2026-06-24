@@ -114,6 +114,61 @@ func TestLoadConfig_FromLocalFile(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_GitLabFromLocalFile(t *testing.T) {
+	tmp := t.TempDir()
+	chdirTemp(t, tmp)
+	t.Setenv("GITLAB_BASE_URL", "")
+	t.Setenv("GITLAB_TOKEN", "")
+	t.Setenv("GITLAB_PROJECT", "")
+
+	writeConfigFile(t, filepath.Join(tmp, ".tapd.json"), &config.Config{
+		GitLabBaseURL: "https://git.bilibili.co",
+		GitLabToken:   "file_gitlab_token",
+		GitLabProject: "go-vas/vas",
+	})
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GitLabBaseURL != "https://git.bilibili.co" {
+		t.Errorf("expected gitlab_base_url from file, got %s", cfg.GitLabBaseURL)
+	}
+	if cfg.GitLabToken != "file_gitlab_token" {
+		t.Errorf("expected gitlab_token from file, got %s", cfg.GitLabToken)
+	}
+	if cfg.GitLabProject != "go-vas/vas" {
+		t.Errorf("expected gitlab_project from file, got %s", cfg.GitLabProject)
+	}
+}
+
+func TestLoadConfig_GitLabEnvOverridesFile(t *testing.T) {
+	tmp := t.TempDir()
+	chdirTemp(t, tmp)
+	writeConfigFile(t, filepath.Join(tmp, ".tapd.json"), &config.Config{
+		GitLabBaseURL: "https://file.example.com",
+		GitLabToken:   "file_token",
+		GitLabProject: "file/project",
+	})
+	t.Setenv("GITLAB_BASE_URL", "https://env.example.com")
+	t.Setenv("GITLAB_TOKEN", "env_token")
+	t.Setenv("GITLAB_PROJECT", "env/project")
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GitLabBaseURL != "https://env.example.com" {
+		t.Errorf("expected env gitlab_base_url, got %s", cfg.GitLabBaseURL)
+	}
+	if cfg.GitLabToken != "env_token" {
+		t.Errorf("expected env gitlab_token, got %s", cfg.GitLabToken)
+	}
+	if cfg.GitLabProject != "env/project" {
+		t.Errorf("expected env gitlab_project, got %s", cfg.GitLabProject)
+	}
+}
+
 func TestLoadConfig_LocalFileOverHomeFile(t *testing.T) {
 	tmp := t.TempDir()
 	chdirTemp(t, tmp)
